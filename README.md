@@ -1,6 +1,8 @@
-# Copal
+<p align="center">
+  <img src="brand/copal-lockup-horizontal.png" alt="Copal" width="380">
+</p>
 
-**A self-hosted, headless personal knowledge hub — a persistent memory layer for your LLM assistants.**
+<p align="center"><strong>A self-hosted, headless personal knowledge hub — a persistent memory layer for your LLM assistants.</strong></p>
 
 Copal is an open-source **second brain** that sits *between* your AI assistants (Claude, ChatGPT, agents like **[Hermes](https://github.com/nousresearch/hermes-agent)**, n8n) and stores everything they capture, so nothing is ever lost and any assistant can pick up where another left off. It exposes **one tool surface** — an **MCP server** (Model Context Protocol) plus a REST mirror — that *N* conversational clients read and write through. Copal itself doesn't chat; it remembers.
 
@@ -93,4 +95,4 @@ Early but daily-driven and hardened: migrations, tests, CI, an audit log, and a 
 
 ## License
 
-[MIT](LICENSE).
+Code is [MIT](LICENSE). The **Copal name and logo are not covered by the MIT license** — copyright and trademark in the identity belong to the project owner; see [`brand/`](brand/) and [`brand/LICENSE-ASSETS.md`](brand/LICENSE-ASSETS.md).

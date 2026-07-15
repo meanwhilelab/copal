@@ -1,0 +1,12 @@
+{
+  "name": "Copal",
+  "short_name": "Copal",
+  "start_url": "/",
+  "theme_color": "#3F4043",
+  "background_color": "#FBF5F1",
+  "display": "standalone",
+  "icons": [
+    { "src": "/copal-favicon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/copal-favicon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
