@@ -19,15 +19,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/meanwhileai/copal.git"
+    "url": "git+https://github.com/meanwhilelab/copal.git"
   },
   "keywords": [],
   "author": "Antonio Bonanno",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/meanwhileai/copal/issues"
+    "url": "https://github.com/meanwhilelab/copal/issues"
   },
-  "homepage": "https://github.com/meanwhileai/copal#readme",
+  "homepage": "https://github.com/meanwhilelab/copal#readme",
   "type": "module",
   "engines": {
     "node": ">=22"
