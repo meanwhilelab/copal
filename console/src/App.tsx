@@ -175,7 +175,8 @@ function Shell() {
         className="flex-none h-14 flex items-center gap-5 px-5 border-b"
         style={{ borderColor: "var(--line)", background: "linear-gradient(180deg,var(--surface),var(--ground-2))" }}
       >
-        <div className="flex items-baseline gap-2.5">
+        <div className="flex items-center gap-2.5">
+          <img src="/favicon.svg" alt="" className="h-7 w-7 rounded-[6px]" />
           <span className="display text-[1.375rem] font-semibold tracking-wide" style={{ color: "var(--amber-hi)" }}>
             Copal
           </span>

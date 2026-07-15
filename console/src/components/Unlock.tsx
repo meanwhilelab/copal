@@ -33,6 +33,7 @@ export function Unlock({ onUnlock }: { onUnlock: () => void }) {
   return (
     <div className="h-screen grid place-items-center" style={{ background: "var(--ground)" }}>
       <div className="w-[380px] max-w-[90vw] text-center risein">
+        <img src="/favicon.svg" alt="" className="h-14 w-14 rounded-[12px] mx-auto mb-4" />
         <div className="display text-[2.625rem] font-semibold mb-1" style={{ color: "var(--amber-hi)" }}>
           Copal
         </div>
