@@ -1,0 +1,102 @@
+@import "@fontsource/newsreader/400.css";
+@import "@fontsource/newsreader/500.css";
+@import "@fontsource/newsreader/600.css";
+@import "@fontsource/newsreader/400-italic.css";
+@import "@fontsource/newsreader/500-italic.css";
+@import "@fontsource/public-sans/400.css";
+@import "@fontsource/public-sans/500.css";
+@import "@fontsource/public-sans/600.css";
+@import "@fontsource/public-sans/700.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+@import "tailwindcss";
+
+/* ==== Copal material tokens — ported verbatim from Copal.dc.html ==== */
+:root {
+  /* Linear-like cool near-black surface + a single warm amber accent */
+  --ground:#0D0D10; --ground-2:#141417; --surface:#191920; --surface-2:#1E1E25;
+  --surface-hi:#25252D; --line:#2A2A31; --line-2:#3A3A44;
+  --text:#F2F3F5; --text-2:#A4A7B0; --text-3:#6E717C;
+  --amber:#E8A84C; --amber-hi:#F5C36C; --amber-deep:#C67C2C; --honey:#DE8F38;
+  --lane-a:#E8A84C; --lane-b:#E0785B; --lane-c:#6FA98D;
+  --st-neutral:#8C8F9A; --st-spec:#8B95C9; --st-active:#E8A84C; --st-done:#6FA98D;
+  --pri-alta:#E0785B; --pri-media:#E0A24C; --pri-bassa:#6E717C;
+  --glow:rgba(232,168,76,.16); --sunk-tint:rgba(232,168,76,.05);
+  --scrim:rgba(4,4,6,.66);
+}
+[data-theme="light"] {
+  /* Linear-like cool neutral surface + a single warm amber accent */
+  --ground:#F6F7F9; --ground-2:#ECEEF2; --surface:#FFFFFF; --surface-2:#F7F8FA;
+  --surface-hi:#EFF0F3; --line:#E6E8ED; --line-2:#D6D9E0;
+  --text:#191B20; --text-2:#585E6A; --text-3:#8C919C;
+  --amber:#BE7017; --amber-hi:#D98A2B; --amber-deep:#95560F; --honey:#BE7017;
+  --lane-a:#BE7017; --lane-b:#C2542F; --lane-c:#3F8168;
+  --st-neutral:#8A8F9A; --st-spec:#6B76A0; --st-active:#BE7017; --st-done:#3F8168;
+  --pri-alta:#C2452F; --pri-media:#BE7017; --pri-bassa:#8C919C;
+  --glow:rgba(190,112,23,.12); --sunk-tint:rgba(190,112,23,.05);
+  --scrim:rgba(20,22,28,.42);
+}
+
+html, body, #root { height: 100%; margin: 0; }
+/* Single type-scale knob: every font size is rem-relative, so this one value
+   scales all text proportionally. 100% = the original scale; 112.5% = +12.5%. */
+html { font-size: 112.5%; }
+body {
+  background: var(--ground);
+  color: var(--text);
+  font-family: "Public Sans", system-ui, sans-serif;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 8px; border: 3px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+@keyframes warmpulse {
+  0%, 100% { box-shadow: 0 0 0 1px var(--line), 0 0 18px -6px var(--glow); }
+  50% { box-shadow: 0 0 0 1px var(--line), 0 0 26px -4px var(--glow); }
+}
+@keyframes risein { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes settle {
+  0% { background: color-mix(in srgb, var(--st-done) 22%, transparent); transform: translateY(-2px); }
+  100% { background: transparent; transform: none; }
+}
+.risein { animation: risein .3s ease both; }
+.settle { animation: settle 1.1s ease both; }
+.warm-glow { box-shadow: 0 0 22px -8px var(--glow); border-color: color-mix(in srgb, var(--amber) 30%, var(--line)) !important; }
+.sunk-row { opacity: .62; background: var(--sunk-tint); filter: saturate(.7); }
+.mono { font-family: "IBM Plex Mono", monospace; }
+.display { font-family: "Public Sans", system-ui, sans-serif; letter-spacing: -0.011em; }
+.kicker { font-family: "IBM Plex Mono", monospace; font-size: 0.625rem; letter-spacing: .12em; text-transform: uppercase; color: var(--text-3); }
+
+/* Rendered markdown (object bodies). Rem-based to follow the type scale;
+   token-based to work in both themes. */
+.md { color: var(--text-2); font-size: 0.8125rem; line-height: 1.65; }
+.md > *:first-child { margin-top: 0; }
+.md > *:last-child { margin-bottom: 0; }
+.md h1, .md h2, .md h3, .md h4, .md h5 { color: var(--text); font-weight: 600; line-height: 1.3; letter-spacing: -.01em; margin: 1.4em 0 .5em; }
+.md h1 { font-size: 1.3rem; }
+.md h2 { font-size: 1.12rem; }
+.md h3 { font-size: 1rem; }
+.md h4, .md h5 { font-size: .9rem; }
+.md p { margin: .7em 0; }
+.md a { color: var(--amber); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--amber) 35%, transparent); }
+.md a:hover { border-bottom-color: var(--amber); }
+.md ul, .md ol { margin: .6em 0; padding-left: 1.4em; }
+.md ul { list-style: disc; }
+.md ol { list-style: decimal; }
+.md li { margin: .25em 0; }
+.md li::marker { color: var(--text-3); }
+.md code { font-family: "IBM Plex Mono", monospace; font-size: .86em; background: var(--surface-2); border: 1px solid var(--line); border-radius: 5px; padding: .08em .35em; }
+.md pre { background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px; padding: .8em 1em; overflow-x: auto; margin: .8em 0; }
+.md pre code { background: none; border: 0; padding: 0; font-size: .82rem; line-height: 1.55; }
+.md blockquote { margin: .8em 0; padding: .1em 0 .1em 1em; border-left: 2px solid var(--line-2); color: var(--text-3); }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 1.4em 0; }
+.md strong { color: var(--text); font-weight: 600; }
+.md table { border-collapse: collapse; margin: .8em 0; font-size: .78rem; display: block; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--line); padding: .4em .65em; text-align: left; }
+.md th { background: var(--ground-2); color: var(--text); font-weight: 600; }
+.md img { max-width: 100%; border-radius: 8px; }
+.md input[type="checkbox"] { margin-right: .45em; vertical-align: middle; }

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+ops/hermes-plugin/amber-capture/token
+# Local deployment overrides — keep production/infra specifics out of the repo.
+docker-compose.override.yml

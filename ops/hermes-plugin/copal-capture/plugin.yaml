@@ -1,0 +1,3 @@
+name: copal-capture
+version: "1.0"
+description: Posts finalized Hermes session transcripts to Copal (structural capture safety-net).

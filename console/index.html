@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Copal</title>
+      <script>
+      // One-time key migration (the app was renamed Amber → Copal) so existing
+      // sessions and preferences survive. Runs before anything reads a key.
+      ["token", "theme", "ws", "board"].forEach(function (k) {
+        var old = localStorage.getItem("amber_" + k);
+        if (old !== null && localStorage.getItem("copal_" + k) === null) {
+          localStorage.setItem("copal_" + k, old);
+        }
+      });
+      document.documentElement.dataset.theme = localStorage.getItem("copal_theme") || "light";
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,29 @@
+# Compose for a self-hosted Copal. Adjust to your environment:
+#  - DATABASE_URL (in .env) points at your PostgreSQL 16 + pgvector.
+#  - By default the app joins an EXTERNAL reverse-proxy network (set CADDY_NETWORK
+#    in .env) so a proxy can `reverse_proxy copal:8787`. To run standalone instead,
+#    drop the `networks:` blocks and add `ports: ["8787:8787"]`.
+# Keep production/host-specific overrides in a local, gitignored
+# docker-compose.override.yml.
+services:
+  copal:
+    build: .
+    image: copal:latest
+    container_name: copal
+    restart: unless-stopped
+    env_file: .env
+    expose:
+      - "8787"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 4s
+      start_period: 20s
+      retries: 3
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true
+    name: ${CADDY_NETWORK:-caddy_default}

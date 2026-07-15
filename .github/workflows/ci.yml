@@ -1,0 +1,116 @@
+name: CI
+
+# Quality gate on every push and PR. Mirrors the local discipline documented in
+# CONTEXT.md so correctness no longer depends on remembering to run it by hand.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: CI only needs to read the code.
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend — build · migrate · seed · test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # pgvector is required by migration 0005 (vector column + HNSW index).
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: amber
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # CI connects as the postgres superuser so CREATE EXTENSION works and the
+      # migrations apply cleanly from an empty database (prod uses a scoped role).
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/amber
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Create pgvector extension (superuser, out-of-band like prod)
+        run: psql "$DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+      - name: Apply migrations from an empty database
+        run: npm run db:migrate
+
+      - name: Seed baseline rows
+        run: npm run db:seed
+
+      - name: Type-check / build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Schema ↔ migrations in sync
+        # A clean `db:generate` must produce NO new migration; otherwise the
+        # Drizzle schema drifted from the committed migrations.
+        run: |
+          npm run db:generate
+          if [ -n "$(git status --porcelain drizzle)" ]; then
+            echo "::error::Drizzle schema and migrations are out of sync — run 'npm run db:generate' and commit the migration."
+            git status --porcelain drizzle
+            git --no-pager diff -- drizzle
+            exit 1
+          fi
+
+      - name: Dependency audit (advisory)
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
+  console:
+    name: Console — lint · build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Build
+        run: npm run build
+      - name: Dependency audit (advisory)
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks (OSS CLI — no license needed)
+        # Repo mounted read-only. TODO before open-sourcing: pin this image to a
+        # digest (ghcr.io/gitleaks/gitleaks@sha256:…) and pin the actions above
+        # (checkout, setup-node) to commit SHAs.
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" ghcr.io/gitleaks/gitleaks:latest \
+            detect --source=/repo --redact --verbose --exit-code 1

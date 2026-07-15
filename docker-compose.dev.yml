@@ -1,0 +1,17 @@
+# Local development database only — production uses your own Postgres.
+# pgvector/pgvector:pg16 = Postgres 16 with the pgvector extension preinstalled
+# (prod installs postgresql-16-pgvector via ops/amber-pgvector-setup.sh).
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: amber-dev-db
+    environment:
+      POSTGRES_USER: amber
+      POSTGRES_PASSWORD: amber
+      POSTGRES_DB: amber
+    ports:
+      - "5433:5432"
+    volumes:
+      - amber-dev-pgdata:/var/lib/postgresql/data
+volumes:
+  amber-dev-pgdata:
