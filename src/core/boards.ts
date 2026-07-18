@@ -143,14 +143,20 @@ export async function updateBoard(
  * loadConnections in objects.ts (both directions, excludes touches/attachment
  * links and edges whose other end is a redacted content or session), but
  * aggregated for every item on the board in one query instead of one per item.
+ * Also reports, per item, how many of those counted others are sunk (still
+ * counted in the totals — just flagged so the console can hint at it).
  */
-async function loadLinkCounts(db: Db, itemIds: string[]): Promise<Map<string, Record<string, number>>> {
-  const counts = new Map<string, Record<string, number>>();
+async function loadLinkCounts(
+  db: Db,
+  itemIds: string[],
+): Promise<Map<string, { linkCounts: Record<string, number>; sunkLinkCount: number }>> {
+  const counts = new Map<string, { linkCounts: Record<string, number>; sunkLinkCount: number }>();
   if (itemIds.length === 0) return counts;
   const idList = sql.join(itemIds.map((id) => sql`${id}::uuid`), sql`, `);
   const rows = (
     await db.execute(sql`
-    SELECT item_id, other_type, COUNT(*)::int AS cnt
+    SELECT e.item_id, e.other_type, COUNT(*)::int AS cnt,
+           COUNT(*) FILTER (WHERE coalesce(i.sunk_at, it.sunk_at, c.sunk_at) IS NOT NULL)::int AS sunk_cnt
     FROM (
       SELECT l.from_id AS item_id, l.to_type AS other_type, l.to_id AS other_id
         FROM links l WHERE l.from_type='item' AND l.from_id IN (${idList}) AND l.link_type NOT IN ('touches', 'attachment')
@@ -158,15 +164,18 @@ async function loadLinkCounts(db: Db, itemIds: string[]): Promise<Map<string, Re
       SELECT l.to_id AS item_id, l.from_type AS other_type, l.from_id AS other_id
         FROM links l WHERE l.to_type='item' AND l.to_id IN (${idList}) AND l.link_type NOT IN ('touches', 'attachment')
     ) e
+    LEFT JOIN ideas i    ON e.other_type='idea'    AND i.id=e.other_id
+    LEFT JOIN items it   ON e.other_type='item'    AND it.id=e.other_id
     LEFT JOIN contents c ON e.other_type='content' AND c.id=e.other_id
     LEFT JOIN sessions s ON e.other_type='session' AND s.id=e.other_id
     WHERE coalesce(c.redacted_at, s.redacted_at) IS NULL
-    GROUP BY item_id, other_type`)
-  ).rows as { item_id: string; other_type: string; cnt: number }[];
+    GROUP BY e.item_id, e.other_type`)
+  ).rows as { item_id: string; other_type: string; cnt: number; sunk_cnt: number }[];
   for (const r of rows) {
-    const m = counts.get(r.item_id) ?? {};
-    m[r.other_type] = r.cnt;
-    counts.set(r.item_id, m);
+    const entry = counts.get(r.item_id) ?? { linkCounts: {}, sunkLinkCount: 0 };
+    entry.linkCounts[r.other_type] = r.cnt;
+    entry.sunkLinkCount += r.sunk_cnt;
+    counts.set(r.item_id, entry);
   }
   return counts;
 }
@@ -182,7 +191,10 @@ export async function getBoard(db: Db, boardId: string, includeSunk = false) {
     orderBy: (t, { desc }) => [desc(t.updatedAt)],
   });
   const linkCounts = await loadLinkCounts(db, rows.map((it) => it.id));
-  const withCounts = rows.map((it) => ({ ...it, linkCounts: linkCounts.get(it.id) ?? {} }));
+  const withCounts = rows.map((it) => {
+    const entry = linkCounts.get(it.id);
+    return { ...it, linkCounts: entry?.linkCounts ?? {}, sunkLinkCount: entry?.sunkLinkCount ?? 0 };
+  });
   const grouped: Record<string, typeof withCounts> = {};
   for (const it of withCounts) (grouped[it.status] ??= []).push(it);
   return { board, items_by_status: grouped };

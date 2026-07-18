@@ -5,6 +5,7 @@ import { db, pool } from "../src/db/client.js";
 import { apiClients, boards, contents, ideas, items, links, sessions, workspaces } from "../src/db/schema.js";
 import { generateToken, hashToken, type AuthedClient } from "../src/core/auth.js";
 import { saveIdea, touchIdea } from "../src/core/ideas.js";
+import { createProposal } from "../src/core/proposals.js";
 import { buildApp } from "../src/rest/server.js";
 
 const suffix = randomUUID().slice(0, 8);
@@ -50,6 +51,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app.close();
+  await db.execute(sql`DELETE FROM proposals WHERE from_id IN (SELECT id FROM ideas WHERE created_by_client_id = ${writer.id}::uuid) OR to_id IN (SELECT id FROM ideas WHERE created_by_client_id = ${writer.id}::uuid)`);
   await db.execute(sql`DELETE FROM links WHERE created_by_client_id = ${writer.id}::uuid OR from_id IN (SELECT id FROM sessions WHERE client_id=${writer.id}::uuid)`);
   await db.execute(sql`DELETE FROM jobs WHERE subject_id IN (SELECT id FROM sessions WHERE client_id=${writer.id}::uuid)`);
   await db.execute(sql`DELETE FROM idempotency_keys WHERE client_id = ${writer.id}::uuid`);
@@ -257,5 +259,103 @@ describe("ideas + captures + vitals", () => {
     expect(v.version).toBeDefined();
     expect(typeof v.housekeeper_cost_today_eur).toBe("number");
     expect(typeof v.jobs_pending).toBe("number");
+  });
+});
+
+describe("sunk-object visibility", () => {
+  it("getObject flags a connection to a sunk object, not a live one", async () => {
+    const [item] = await db
+      .insert(items)
+      .values({ boardId, name: `obj-item-${suffix}`, status: "open" })
+      .returning();
+    const [liveIdea] = await db
+      .insert(ideas)
+      .values({ workspaceId: wsId, title: `obj-live-${suffix}`, createdByClientId: writer.id })
+      .returning();
+    const [sunkIdea] = await db
+      .insert(ideas)
+      .values({ workspaceId: wsId, title: `obj-sunk-${suffix}`, createdByClientId: writer.id, sunkAt: new Date() })
+      .returning();
+    await db.insert(links).values([
+      { fromType: "item", fromId: item!.id, toType: "idea", toId: liveIdea!.id, linkType: "connected", createdByClientId: writer.id },
+      { fromType: "item", fromId: item!.id, toType: "idea", toId: sunkIdea!.id, linkType: "connected", createdByClientId: writer.id },
+    ]);
+
+    const obj = (await (
+      await fetch(`${baseUrl}/api/v1/object/item/${item!.id}`, { headers: H })
+    ).json()) as { connections: { id: string; sunk: boolean }[] };
+    expect(obj.connections.find((c) => c.id === liveIdea!.id)?.sunk).toBe(false);
+    expect(obj.connections.find((c) => c.id === sunkIdea!.id)?.sunk).toBe(true);
+  });
+
+  it("board linkCounts count a sunk connection in the totals and flag sunkLinkCount", async () => {
+    const [item] = await db
+      .insert(items)
+      .values({ boardId, name: `sunk-cnt-item-${suffix}`, status: "open" })
+      .returning();
+    const [liveIdea] = await db
+      .insert(ideas)
+      .values({ workspaceId: wsId, title: `sunk-cnt-live-${suffix}`, createdByClientId: writer.id })
+      .returning();
+    const [sunkIdea] = await db
+      .insert(ideas)
+      .values({ workspaceId: wsId, title: `sunk-cnt-sunk-${suffix}`, createdByClientId: writer.id, sunkAt: new Date() })
+      .returning();
+    await db.insert(links).values([
+      { fromType: "item", fromId: item!.id, toType: "idea", toId: liveIdea!.id, linkType: "connected", createdByClientId: writer.id },
+      { fromType: "item", fromId: item!.id, toType: "idea", toId: sunkIdea!.id, linkType: "connected", createdByClientId: writer.id },
+    ]);
+
+    const board = (await (
+      await fetch(`${baseUrl}/api/v1/board/${boardId}`, { headers: H })
+    ).json()) as { items_by_status: Record<string, { id: string; linkCounts?: Record<string, number>; sunkLinkCount?: number }[]> };
+    const found = Object.values(board.items_by_status).flat().find((i) => i.id === item!.id);
+    expect(found?.linkCounts).toEqual({ idea: 2 });
+    expect(found?.sunkLinkCount).toBe(1);
+  });
+
+  it("captures stream flags a sunk idea", async () => {
+    const [idea] = await db
+      .insert(ideas)
+      .values({ workspaceId: wsId, title: `cap-sunk-${suffix}`, createdByClientId: writer.id, sunkAt: new Date() })
+      .returning();
+
+    const res = (await (
+      await fetch(`${baseUrl}/api/v1/captures?limit=50`, { headers: H })
+    ).json()) as { captures: { id: string; sunk: boolean }[] };
+    const found = res.captures.find((c) => c.id === idea!.id);
+    expect(found).toBeDefined();
+    expect(found!.sunk).toBe(true);
+  });
+});
+
+describe("proposals", () => {
+  it("flags from_sunk/to_sunk when a proposal touches a sunk entity", async () => {
+    const [liveIdea] = await db
+      .insert(ideas)
+      .values({ workspaceId: wsId, title: `prop-live-${suffix}`, createdByClientId: writer.id })
+      .returning();
+    const [sunkIdea] = await db
+      .insert(ideas)
+      .values({ workspaceId: wsId, title: `prop-sunk-${suffix}`, createdByClientId: writer.id, sunkAt: new Date() })
+      .returning();
+
+    await createProposal(db, {
+      kind: "resurrect",
+      fromType: "idea",
+      fromId: sunkIdea!.id,
+      toType: "idea",
+      toId: liveIdea!.id,
+      score: 0.87,
+      rationale: "resurrection candidate",
+    });
+
+    const list = (await (await fetch(`${baseUrl}/api/v1/proposals`, { headers: H })).json()) as {
+      proposals: { from_id: string; to_id: string; from_sunk: boolean; to_sunk: boolean }[];
+    };
+    const p = list.proposals.find((x) => x.from_id === sunkIdea!.id && x.to_id === liveIdea!.id);
+    expect(p).toBeDefined();
+    expect(p!.from_sunk).toBe(true);
+    expect(p!.to_sunk).toBe(false);
   });
 });

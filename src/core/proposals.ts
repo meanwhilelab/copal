@@ -46,7 +46,9 @@ export async function listProposals(db: Db) {
       SELECT p.id, p.kind, p.from_type, p.from_id, p.to_type, p.to_id, p.score,
              p.rationale, p.suggested_link_type, p.created_at,
              coalesce(ai.title, ait.name, ac.title, ${sql.raw(sessionTitleSql("asess"))}) AS from_title,
-             coalesce(bi.title, bit.name, bc.title, ${sql.raw(sessionTitleSql("bsess"))}) AS to_title
+             coalesce(bi.title, bit.name, bc.title, ${sql.raw(sessionTitleSql("bsess"))}) AS to_title,
+             coalesce(ai.sunk_at, ait.sunk_at, ac.sunk_at) IS NOT NULL AS from_sunk,
+             coalesce(bi.sunk_at, bit.sunk_at, bc.sunk_at) IS NOT NULL AS to_sunk
       FROM proposals p
       LEFT JOIN ideas ai     ON p.from_type='idea'    AND ai.id=p.from_id
       LEFT JOIN items ait    ON p.from_type='item'    AND ait.id=p.from_id

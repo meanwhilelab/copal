@@ -1,6 +1,7 @@
 import { toast } from "sonner";
 import { useProposals, useResolveProposal } from "../api/hooks.js";
 import { stripLabel, type Proposal } from "../api/types.js";
+import { SinkGlyph } from "./Board.js";
 
 const KIND: Record<Proposal["kind"], { label: string; color: string; verb: string }> = {
   link: { label: "connection", color: "var(--lane-c)", verb: "Link them" },
@@ -8,14 +9,30 @@ const KIND: Record<Proposal["kind"], { label: string; color: string; verb: strin
   resurrect: { label: "resurface", color: "var(--amber)", verb: "Resurface" },
 };
 
-function ProposalCard({ p }: { p: Proposal }) {
+function EndpointCell({ type, title, sunk }: { type: string; title: string | null; sunk: boolean }) {
+  return (
+    <div className="flex-1 rounded-lg border p-2.5" style={{ borderColor: "var(--line)", background: "var(--ground)" }}>
+      <div className="flex items-center gap-1.5 mb-1">
+        <div className="kicker text-[0.5313rem]">{type}</div>
+        {sunk && (
+          <span title="sunk" className="flex-none w-3.5 h-3.5 rounded grid place-items-center border" style={{ background: "var(--sunk-tint)", borderColor: "var(--line)" }}>
+            <SinkGlyph size={8} />
+          </span>
+        )}
+      </div>
+      <div className="display text-[0.875rem] font-medium leading-snug">{title ?? "—"}</div>
+    </div>
+  );
+}
+
+function ProposalCard({ p, sunk }: { p: Proposal; sunk?: boolean }) {
   const resolve = useResolveProposal();
   const k = KIND[p.kind];
   const pct = p.score != null ? Math.round(p.score * 100) : null;
   return (
     <div
-      className="rounded-xl border p-4 risein"
-      style={{ background: "var(--surface)", borderColor: "var(--line)" }}
+      className={`rounded-xl border p-4 risein ${sunk ? "sunk-row" : ""}`}
+      style={{ background: sunk ? undefined : "var(--surface)", borderColor: "var(--line)" }}
     >
       <div className="flex items-center gap-2.5 mb-3">
         <span
@@ -36,19 +53,13 @@ function ProposalCard({ p }: { p: Proposal }) {
       </div>
 
       <div className="flex items-stretch gap-3 mb-3">
-        <div className="flex-1 rounded-lg border p-2.5" style={{ borderColor: "var(--line)", background: "var(--ground)" }}>
-          <div className="kicker text-[0.5313rem] mb-1">{p.from_type}</div>
-          <div className="display text-[0.875rem] font-medium leading-snug">{p.from_title}</div>
-        </div>
+        <EndpointCell type={p.from_type} title={p.from_title} sunk={p.from_sunk} />
         <div className="grid place-items-center" style={{ color: k.color }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
             <path d="M5 12h14M13 6l6 6-6 6" />
           </svg>
         </div>
-        <div className="flex-1 rounded-lg border p-2.5" style={{ borderColor: "var(--line)", background: "var(--ground)" }}>
-          <div className="kicker text-[0.5313rem] mb-1">{p.to_type ?? "—"}</div>
-          <div className="display text-[0.875rem] font-medium leading-snug">{p.to_title ?? "—"}</div>
-        </div>
+        <EndpointCell type={p.to_type ?? "—"} title={p.to_title} sunk={p.to_sunk} />
       </div>
 
       {p.rationale && (
@@ -98,6 +109,8 @@ function ProposalCard({ p }: { p: Proposal }) {
 export function ProposalsView() {
   const proposals = useProposals();
   const list = proposals.data?.proposals ?? [];
+  const live = list.filter((p) => !p.from_sunk && !p.to_sunk);
+  const sunk = list.filter((p) => p.from_sunk || p.to_sunk);
 
   return (
     <div className="px-[26px] pt-[22px] pb-[60px]">
@@ -124,11 +137,30 @@ export function ProposalsView() {
           </div>
         </div>
       ) : (
-        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(360px,1fr))" }}>
-          {list.map((p) => (
-            <ProposalCard key={p.id} p={p} />
-          ))}
-        </div>
+        <>
+          <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(360px,1fr))" }}>
+            {live.map((p) => (
+              <ProposalCard key={p.id} p={p} />
+            ))}
+          </div>
+
+          {sunk.length > 0 && (
+            <>
+              <div className="flex items-center gap-2 mt-8 mb-3">
+                <SinkGlyph size={11} />
+                <h2 className="kicker m-0">From the material</h2>
+                <span className="text-[0.6875rem]" style={{ color: "var(--text-3)" }}>
+                  {sunk.length}
+                </span>
+              </div>
+              <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(360px,1fr))" }}>
+                {sunk.map((p) => (
+                  <ProposalCard key={p.id} p={p} sunk />
+                ))}
+              </div>
+            </>
+          )}
+        </>
       )}
     </div>
   );

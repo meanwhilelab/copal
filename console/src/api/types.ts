@@ -24,6 +24,7 @@ export type Item = {
   version: number;
   sunkAt: string | null;
   linkCounts?: Record<string, number>;
+  sunkLinkCount?: number;
 };
 
 export type BoardDetail = {
@@ -60,6 +61,7 @@ export type Capture = {
   human_text: string | null;
   warmth: Warmth | null;
   touch_count: number | null;
+  sunk: boolean;
 };
 
 export type SearchResult = {
@@ -118,7 +120,7 @@ export type ContentDetail = {
   catalogue: { summary?: string; tags?: string[] } | null;
 };
 
-export type Connection = { type: string; id: string; link_type: string; title: string };
+export type Connection = { type: string; id: string; link_type: string; title: string; sunk: boolean };
 export type ObjectResonance = { entity_type: string; entity_id: string; title: string; similarity: number };
 export type ObjectDetail = {
   type: string;
@@ -152,6 +154,8 @@ export type Proposal = {
   suggested_link_type: string | null;
   from_title: string;
   to_title: string | null;
+  from_sunk: boolean;
+  to_sunk: boolean;
   created_at: string;
 };
 

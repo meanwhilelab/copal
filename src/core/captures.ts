@@ -16,16 +16,18 @@ export async function listCaptures(db: Db, limit = 30) {
             i.last_touched_at, i.touch_count,
             (SELECT l.note FROM links l WHERE l.to_type='idea' AND l.to_id=i.id
                AND l.link_type='touches' AND l.note IS NOT NULL
-             ORDER BY l.created_at DESC LIMIT 1) AS latest_note
+             ORDER BY l.created_at DESC LIMIT 1) AS latest_note,
+            i.sunk_at IS NOT NULL AS sunk
      FROM ideas i LEFT JOIN api_clients c ON c.id = i.created_by_client_id)
     UNION ALL
     (SELECT 'session', s.id, ${sql.raw(sessionTitleSql("s"))}, s.created_at, c.name,
-            NULL, s.summary, NULL, NULL, NULL
+            NULL, s.summary, NULL, NULL, NULL, false
      FROM sessions s LEFT JOIN api_clients c ON c.id = s.client_id
      WHERE s.redacted_at IS NULL)
     UNION ALL
     (SELECT 'content', co.id, co.title, co.created_at, c.name,
-            NULL, co.catalogue->>'summary', NULL, NULL, NULL
+            NULL, co.catalogue->>'summary', NULL, NULL, NULL,
+            co.sunk_at IS NOT NULL AS sunk
      FROM contents co LEFT JOIN api_clients c ON c.id = co.created_by_client_id
      WHERE co.redacted_at IS NULL)
     ORDER BY created_at DESC
@@ -48,5 +50,6 @@ export async function listCaptures(db: Db, limit = 30) {
         ? warmthBand(new Date(r.last_touched_at as string))
         : null,
     touch_count: r.touch_count ?? null,
+    sunk: r.sunk === true,
   }));
 }

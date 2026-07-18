@@ -2,6 +2,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useLink, useObject, useRedact, useSearch, useUnlink, useUnsink } from "../api/hooks.js";
 import { stripLabel, type ObjectDetail } from "../api/types.js";
+import { SinkGlyph } from "../views/Board.js";
 import { AttachmentsButton } from "./AttachmentsButton.js";
 import { Markdown } from "./Markdown.js";
 
@@ -18,6 +19,16 @@ const TypeBadge = ({ type }: { type: string }) => (
     style={{ color: TYPE_COLOR[type] ?? "var(--text-2)", background: `color-mix(in srgb, ${TYPE_COLOR[type] ?? "var(--text-2)"} 15%, transparent)` }}
   >
     {type}
+  </span>
+);
+
+const SunkChip = () => (
+  <span
+    title="sunk — included in the material"
+    className="flex-none w-4 h-4 rounded grid place-items-center border"
+    style={{ background: "var(--sunk-tint)", borderColor: "var(--line)" }}
+  >
+    <SinkGlyph size={9} />
   </span>
 );
 
@@ -55,9 +66,10 @@ function LinkPicker({ obj, onDone }: { obj: ObjectDetail; onDone: () => void }) 
                   },
                 )
               }
-              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left cursor-pointer border-0 bg-transparent hover:bg-(--surface-hi)"
+              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left cursor-pointer border-0 bg-transparent hover:bg-(--surface-hi) ${r.sunk ? "sunk-row" : ""}`}
             >
               <TypeBadge type={r.type} />
+              {r.sunk && <SunkChip />}
               <span className="flex-1 min-w-0 text-[0.75rem] truncate" style={{ color: "var(--text-2)" }}>{r.title}</span>
             </button>
           ))}
@@ -150,9 +162,14 @@ export function ObjectView({
 
         <div className="flex flex-col gap-1.5 mb-6">
           {d.connections.map((c) => (
-            <div key={`${c.type}-${c.id}`} className="flex items-center gap-2 px-2.5 py-2 rounded-[9px] border" style={{ borderColor: "var(--line)", background: "var(--ground)" }}>
+            <div
+              key={`${c.type}-${c.id}`}
+              className={`flex items-center gap-2 px-2.5 py-2 rounded-[9px] border ${c.sunk ? "sunk-row" : ""}`}
+              style={{ borderColor: "var(--line)", background: "var(--ground)" }}
+            >
               <button onClick={() => onNavigate(c.type, c.id)} className="flex-1 min-w-0 flex items-center gap-2 text-left cursor-pointer bg-transparent border-0">
                 <TypeBadge type={c.type} />
+                {c.sunk && <SunkChip />}
                 <span className="flex-1 min-w-0 text-[0.7813rem] truncate" style={{ color: "var(--text-2)" }}>{c.title}</span>
               </button>
               <button

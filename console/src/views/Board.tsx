@@ -79,10 +79,11 @@ function LinkCountBadge({ item, ctx }: { item: Item; ctx: Ctx }) {
   const total = counts ? Object.values(counts).reduce((a, b) => a + b, 0) : 0;
   if (total === 0) return null;
   const plural: Record<string, string> = { idea: "ideas", item: "items", session: "sessions", content: "contents" };
-  const breakdown = Object.entries(counts!)
-    .sort((a, b) => b[1] - a[1])
-    .map(([type, n]) => `${n} ${n === 1 ? type : (plural[type] ?? `${type}s`)}`)
-    .join(" · ");
+  const breakdown =
+    Object.entries(counts!)
+      .sort((a, b) => b[1] - a[1])
+      .map(([type, n]) => `${n} ${n === 1 ? type : (plural[type] ?? `${type}s`)}`)
+      .join(" · ") + (item.sunkLinkCount ? ` · ${item.sunkLinkCount} in the material` : "");
   return (
     <button
       onClick={() => ctx.onOpenObject("item", item.id)}

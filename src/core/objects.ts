@@ -102,7 +102,8 @@ async function loadConnections(db: Db, type: ObjectType, id: string) {
     db,
     sql`
     SELECT e.other_type AS type, e.other_id AS id, e.link_type,
-           coalesce(i.title, it.name, c.title, ${sql.raw(sessionTitleSql("s"))}) AS title
+           coalesce(i.title, it.name, c.title, ${sql.raw(sessionTitleSql("s"))}) AS title,
+           coalesce(i.sunk_at, it.sunk_at, c.sunk_at) IS NOT NULL AS sunk
     FROM (
       SELECT l.to_type AS other_type, l.to_id AS other_id, l.link_type
         FROM links l WHERE l.from_type=${type} AND l.from_id=${id}::uuid AND l.link_type NOT IN ('touches', 'attachment')
