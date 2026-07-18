@@ -74,6 +74,27 @@ function conflictToast(err: unknown) {
   }
 }
 
+function LinkCountBadge({ item, ctx }: { item: Item; ctx: Ctx }) {
+  const counts = item.linkCounts;
+  const total = counts ? Object.values(counts).reduce((a, b) => a + b, 0) : 0;
+  if (total === 0) return null;
+  const plural: Record<string, string> = { idea: "ideas", item: "items", session: "sessions", content: "contents" };
+  const breakdown = Object.entries(counts!)
+    .sort((a, b) => b[1] - a[1])
+    .map(([type, n]) => `${n} ${n === 1 ? type : (plural[type] ?? `${type}s`)}`)
+    .join(" · ");
+  return (
+    <button
+      onClick={() => ctx.onOpenObject("item", item.id)}
+      title={breakdown}
+      className="flex-none text-[0.7rem] leading-none rounded-full px-1.5 py-[3px] border-0 cursor-pointer"
+      style={{ border: "1px solid var(--line)", color: "var(--text-2)", background: "transparent" }}
+    >
+      ⟡ {total}
+    </button>
+  );
+}
+
 function NameCell({ item, ctx }: { item: Item; ctx: Ctx }) {
   const [draft, setDraft] = useState(item.name);
   const editing = ctx.editing === item.id;
@@ -109,20 +130,33 @@ function NameCell({ item, ctx }: { item: Item; ctx: Ctx }) {
           style={{ background: "var(--ground)", borderColor: "var(--amber)", color: "var(--text)" }}
         />
       ) : (
-        <button
-          onClick={() => {
-            setDraft(item.name);
-            ctx.setEditing(item.id);
-          }}
-          className="flex-1 min-w-0 text-left text-[0.8438rem] px-1 py-1 rounded-md truncate cursor-text border-0 bg-transparent"
-          style={{
-            color: done ? "var(--text-3)" : "var(--text)",
-            textDecoration: done ? "line-through" : undefined,
-            textDecorationColor: "var(--line-2)",
-          }}
-        >
-          {item.name}
-        </button>
+        <>
+          <button
+            onClick={() => ctx.onOpenObject("item", item.id)}
+            className="flex-1 min-w-0 text-left text-[0.8438rem] px-1 py-1 rounded-md truncate cursor-pointer border-0 bg-transparent"
+            style={{
+              color: done ? "var(--text-3)" : "var(--text)",
+              textDecoration: done ? "line-through" : undefined,
+              textDecorationColor: "var(--line-2)",
+            }}
+          >
+            {item.name}
+          </button>
+          <LinkCountBadge item={item} ctx={ctx} />
+          <button
+            title="Rename"
+            onClick={() => {
+              setDraft(item.name);
+              ctx.setEditing(item.id);
+            }}
+            className="flex-none w-5 h-5 grid place-items-center rounded-md border-0 bg-transparent cursor-pointer opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
+            style={{ color: "var(--text-3)" }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+            </svg>
+          </button>
+        </>
       )}
     </div>
   );
@@ -557,7 +591,7 @@ const columns = [
       const ctx = info.table.options.meta as Ctx;
       const item = info.row.original;
       return (
-        <div className="flex items-center justify-end gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+        <div className="flex items-center justify-end gap-0.5">
           <button
             title="Open — connections & detail"
             onClick={() => ctx.onOpenObject("item", item.id)}
@@ -568,43 +602,45 @@ const columns = [
               <path d="M9 6l6 6-6 6" />
             </svg>
           </button>
-          <AttachmentsButton itemId={item.id} />
-          {item.sunkAt ? (
-            <button
-              title="Resurface"
-              onClick={() =>
-                ctx.unsink.mutate({ type: "item", id: item.id }, { onError: conflictToast })
-              }
-              className="w-[26px] h-[26px] grid place-items-center rounded-md border-0 bg-transparent cursor-pointer opacity-55 hover:opacity-100"
-              style={{ color: "var(--text-3)" }}
-            >
-              <UnsinkGlyph size={14} />
-            </button>
-          ) : (
-            <button
-              title="Sink"
-              onClick={() =>
-                ctx.sink.mutate(
-                  { type: "item", id: item.id },
-                  {
-                    onError: conflictToast,
-                    onSuccess: () => {
-                      toast("Sunk into the material.", {
-                        action: {
-                          label: "Undo",
-                          onClick: () => ctx.unsink.mutate({ type: "item", id: item.id }),
-                        },
-                      });
+          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+            <AttachmentsButton itemId={item.id} />
+            {item.sunkAt ? (
+              <button
+                title="Resurface"
+                onClick={() =>
+                  ctx.unsink.mutate({ type: "item", id: item.id }, { onError: conflictToast })
+                }
+                className="w-[26px] h-[26px] grid place-items-center rounded-md border-0 bg-transparent cursor-pointer opacity-55 hover:opacity-100"
+                style={{ color: "var(--text-3)" }}
+              >
+                <UnsinkGlyph size={14} />
+              </button>
+            ) : (
+              <button
+                title="Sink"
+                onClick={() =>
+                  ctx.sink.mutate(
+                    { type: "item", id: item.id },
+                    {
+                      onError: conflictToast,
+                      onSuccess: () => {
+                        toast("Sunk into the material.", {
+                          action: {
+                            label: "Undo",
+                            onClick: () => ctx.unsink.mutate({ type: "item", id: item.id }),
+                          },
+                        });
+                      },
                     },
-                  },
-                )
-              }
-              className="w-[26px] h-[26px] grid place-items-center rounded-md border-0 bg-transparent cursor-pointer opacity-55 hover:opacity-100"
-              style={{ color: "var(--text-3)" }}
-            >
-              <SinkGlyph size={14} />
-            </button>
-          )}
+                  )
+                }
+                className="w-[26px] h-[26px] grid place-items-center rounded-md border-0 bg-transparent cursor-pointer opacity-55 hover:opacity-100"
+                style={{ color: "var(--text-3)" }}
+              >
+                <SinkGlyph size={14} />
+              </button>
+            )}
+          </div>
         </div>
       );
     },

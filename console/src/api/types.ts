@@ -23,6 +23,7 @@ export type Item = {
   link: string | null;
   version: number;
   sunkAt: string | null;
+  linkCounts?: Record<string, number>;
 };
 
 export type BoardDetail = {

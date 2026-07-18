@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db, pool } from "../src/db/client.js";
-import { apiClients, boards, items, workspaces } from "../src/db/schema.js";
+import { apiClients, boards, contents, ideas, items, links, sessions, workspaces } from "../src/db/schema.js";
 import { generateToken, hashToken, type AuthedClient } from "../src/core/auth.js";
 import { saveIdea, touchIdea } from "../src/core/ideas.js";
 import { buildApp } from "../src/rest/server.js";
@@ -55,6 +55,7 @@ afterAll(async () => {
   await db.execute(sql`DELETE FROM idempotency_keys WHERE client_id = ${writer.id}::uuid`);
   await db.execute(sql`DELETE FROM sessions WHERE client_id = ${writer.id}::uuid`);
   await db.execute(sql`DELETE FROM ideas WHERE created_by_client_id = ${writer.id}::uuid`);
+  await db.execute(sql`DELETE FROM contents WHERE created_by_client_id = ${writer.id}::uuid`);
   await db.delete(items).where(eq(items.boardId, boardId));
   await db.delete(boards).where(eq(boards.id, boardId));
   await db.execute(sql`DELETE FROM api_clients WHERE name LIKE ${"con-%" + suffix}`);
@@ -166,6 +167,42 @@ describe("board + items", () => {
       await fetch(`${baseUrl}/api/v1/board/${boardId}`, { headers: H })
     ).json()) as { items_by_status: Record<string, { id: string }[]> };
     expect(JSON.stringify(board.items_by_status)).toContain(itemId);
+  });
+
+  it("attaches per-item link counts, excluding touches/attachment links and redacted other-ends", async () => {
+    const [idea] = await db
+      .insert(ideas)
+      .values({ workspaceId: wsId, title: `cnt-idea-${suffix}`, createdByClientId: writer.id })
+      .returning();
+    const [liveSession] = await db
+      .insert(sessions)
+      .values({ clientId: writer.id, clientSessionId: `cnt-live-${suffix}`, type: "note" })
+      .returning();
+    const [redactedSession] = await db
+      .insert(sessions)
+      .values({ clientId: writer.id, clientSessionId: `cnt-redacted-${suffix}`, type: "note", redactedAt: new Date() })
+      .returning();
+    const [redactedContent] = await db
+      .insert(contents)
+      .values({ workspaceId: wsId, title: `cnt-content-${suffix}`, sourceType: "note", redactedAt: new Date(), createdByClientId: writer.id })
+      .returning();
+
+    await db.insert(links).values([
+      { fromType: "item", fromId: itemId, toType: "idea", toId: idea!.id, linkType: "connected", createdByClientId: writer.id },
+      { fromType: "item", fromId: itemId, toType: "session", toId: liveSession!.id, linkType: "connected", createdByClientId: writer.id },
+      { fromType: "item", fromId: itemId, toType: "session", toId: redactedSession!.id, linkType: "connected", createdByClientId: writer.id },
+      { fromType: "item", fromId: itemId, toType: "content", toId: redactedContent!.id, linkType: "connected", createdByClientId: writer.id },
+      { fromType: "idea", fromId: idea!.id, toType: "item", toId: itemId, linkType: "touches", createdByClientId: writer.id },
+    ]);
+
+    const board = (await (await fetch(`${baseUrl}/api/v1/board/${boardId}`, { headers: H })).json()) as {
+      items_by_status: Record<string, { id: string; linkCounts?: Record<string, number> }[]>;
+    };
+    const item = Object.values(board.items_by_status)
+      .flat()
+      .find((i) => i.id === itemId);
+    // idea + live session counted; touches link, and the redacted session/content, are excluded.
+    expect(item?.linkCounts).toEqual({ idea: 1, session: 1 });
   });
 
   it("403 for read-only token on writes", async () => {

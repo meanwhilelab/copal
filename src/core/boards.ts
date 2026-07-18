@@ -138,6 +138,39 @@ export async function updateBoard(
   });
 }
 
+/**
+ * Per-item connection counts, keyed by other end's type — mirrors
+ * loadConnections in objects.ts (both directions, excludes touches/attachment
+ * links and edges whose other end is a redacted content or session), but
+ * aggregated for every item on the board in one query instead of one per item.
+ */
+async function loadLinkCounts(db: Db, itemIds: string[]): Promise<Map<string, Record<string, number>>> {
+  const counts = new Map<string, Record<string, number>>();
+  if (itemIds.length === 0) return counts;
+  const idList = sql.join(itemIds.map((id) => sql`${id}::uuid`), sql`, `);
+  const rows = (
+    await db.execute(sql`
+    SELECT item_id, other_type, COUNT(*)::int AS cnt
+    FROM (
+      SELECT l.from_id AS item_id, l.to_type AS other_type, l.to_id AS other_id
+        FROM links l WHERE l.from_type='item' AND l.from_id IN (${idList}) AND l.link_type NOT IN ('touches', 'attachment')
+      UNION
+      SELECT l.to_id AS item_id, l.from_type AS other_type, l.from_id AS other_id
+        FROM links l WHERE l.to_type='item' AND l.to_id IN (${idList}) AND l.link_type NOT IN ('touches', 'attachment')
+    ) e
+    LEFT JOIN contents c ON e.other_type='content' AND c.id=e.other_id
+    LEFT JOIN sessions s ON e.other_type='session' AND s.id=e.other_id
+    WHERE coalesce(c.redacted_at, s.redacted_at) IS NULL
+    GROUP BY item_id, other_type`)
+  ).rows as { item_id: string; other_type: string; cnt: number }[];
+  for (const r of rows) {
+    const m = counts.get(r.item_id) ?? {};
+    m[r.other_type] = r.cnt;
+    counts.set(r.item_id, m);
+  }
+  return counts;
+}
+
 /** Board + its items grouped by status. Sunk items only when includeSunk. */
 export async function getBoard(db: Db, boardId: string, includeSunk = false) {
   const board = await db.query.boards.findFirst({ where: eq(boards.id, boardId) });
@@ -148,8 +181,10 @@ export async function getBoard(db: Db, boardId: string, includeSunk = false) {
       : and(eq(items.boardId, boardId), isNull(items.sunkAt)),
     orderBy: (t, { desc }) => [desc(t.updatedAt)],
   });
-  const grouped: Record<string, typeof rows> = {};
-  for (const it of rows) (grouped[it.status] ??= []).push(it);
+  const linkCounts = await loadLinkCounts(db, rows.map((it) => it.id));
+  const withCounts = rows.map((it) => ({ ...it, linkCounts: linkCounts.get(it.id) ?? {} }));
+  const grouped: Record<string, typeof withCounts> = {};
+  for (const it of withCounts) (grouped[it.status] ??= []).push(it);
   return { board, items_by_status: grouped };
 }
 
