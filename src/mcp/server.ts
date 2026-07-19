@@ -10,6 +10,7 @@ import { promoteIdea, saveIdea, touchIdea } from "../core/ideas.js";
 import { withIdempotency } from "../core/idempotency.js";
 import { createItem, updateItem, VersionConflictError, BoardSetValidationError } from "../core/items.js";
 import { linkItems, sinkEntity, type EntityType } from "../core/links.js";
+import { getObject, type ObjectType } from "../core/objects.js";
 import { embeddingProviderFromEnv } from "../core/embeddings.js";
 import { search, type SearchMode, type SearchType } from "../core/search.js";
 import { saveSession } from "../core/sessions.js";
@@ -363,6 +364,31 @@ export function buildMcpServer(db: Db, client: AuthedClient): McpServer {
         (cursor as Record<string, number>) ?? {},
       ),
     ),
+  );
+
+  server.registerTool(
+    "get_object",
+    {
+      description:
+        "Deep-read ONE object in full — the counterpart to search/get_context, which return summaries and snippets: " +
+        "an item (description + the Librarian-compiled context), an idea (description), a session (handoff summary, " +
+        "or raw transcript when none), or a content (the FULL stored document, not its catalogue summary) — plus its " +
+        "declared connections and discovered resonances. Redacted bodies stay redacted. Use max_chars to cap large bodies." +
+        CONTRACT,
+      inputSchema: {
+        type: z.enum(["item", "idea", "session", "content"]),
+        id: z.string().uuid(),
+        max_chars: z.number().int().positive().optional().describe("truncate the body to this many characters"),
+      },
+    },
+    guarded(false, async ({ type, id, max_chars }) => {
+      const obj = await getObject(db, type as ObjectType, id as string);
+      const cap = max_chars as number | undefined;
+      if (cap && obj.body && (obj.body as string).length > cap) {
+        return { ...obj, body: (obj.body as string).slice(0, cap), body_truncated: true };
+      }
+      return obj;
+    }),
   );
 
   server.registerTool(
