@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db, pool } from "../src/db/client.js";
 import { apiClients, boards, contents, items, jobs, links, llmUsage, sessions, workspaces } from "../src/db/schema.js";
@@ -272,5 +272,103 @@ describe("item_context", () => {
 
     const fresh = await db.query.items.findFirst({ where: eq(items.id, item!.id) });
     expect(fresh!.context).toBeNull();
+  });
+
+  describe("linear enrichment", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("includes the live Linear issue's title in the compiled prompt when the item's link is a Linear issue", async () => {
+      const [item] = await db
+        .insert(items)
+        .values({
+          boardId,
+          name: `hk-item-linear-${suffix}`,
+          status: "todo",
+          description: "Track the payments migration",
+          link: "https://linear.app/meanwhile/issue/NAT-2061/ship-the-migration",
+        })
+        .returning();
+      await db.execute(sql`INSERT INTO jobs (kind, subject_id, payload) VALUES
+        ('item_context', ${item!.id}::uuid, ${JSON.stringify({ item_id: item!.id })}::jsonb)`);
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({
+          ok: true,
+          json: async () => ({
+            data: {
+              issue: {
+                identifier: "NAT-2061",
+                title: "Ship the payments migration to prod",
+                description: "Cut over the last tenant.",
+                updatedAt: "2026-07-10T00:00:00.000Z",
+                state: { name: "In Progress" },
+              },
+            },
+          }),
+        })),
+      );
+
+      let sawTitle = false;
+      const provider = fakeProvider((input) => {
+        if (input.user.includes("Ship the payments migration to prod")) sawTitle = true;
+        return "Synthesis referencing the live Linear issue.";
+      });
+      await housekeeperTick(db, provider, null, "test-linear-key");
+      expect(sawTitle).toBe(true);
+
+      const fresh = await db.query.items.findFirst({ where: eq(items.id, item!.id) });
+      expect(fresh!.context).not.toBeNull();
+    });
+
+    it("degrades silently to today's behavior when the Linear fetch fails", async () => {
+      const { idea } = await saveIdea(db, writer, {
+        workspaceId: wsId,
+        title: `hk-linear-fallback-idea-${suffix}`,
+        description: "Fallback material unrelated to Linear.",
+        csid: `hk-item-linear-fail-${suffix}`,
+      });
+      const [item] = await db
+        .insert(items)
+        .values({
+          boardId,
+          name: `hk-item-linear-fail-${suffix}`,
+          status: "todo",
+          description: "Track the payments migration",
+          link: "https://linear.app/meanwhile/issue/NAT-9999/gone",
+        })
+        .returning();
+      await db.insert(links).values({
+        fromType: "item",
+        fromId: item!.id,
+        toType: "idea",
+        toId: idea.id,
+        linkType: "connected",
+        createdByClientId: writer.id,
+      });
+      await db.execute(sql`INSERT INTO jobs (kind, subject_id, payload) VALUES
+        ('item_context', ${item!.id}::uuid, ${JSON.stringify({ item_id: item!.id })}::jsonb)`);
+
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => {
+          throw new Error("network down");
+        }),
+      );
+
+      let sawLinearBlock = false;
+      const provider = fakeProvider((input) => {
+        if (input.user.includes("[linear issue]")) sawLinearBlock = true;
+        return "Synthesis from the fallback idea only.";
+      });
+      const n = await housekeeperTick(db, provider, null, "test-linear-key");
+      expect(n).toBeGreaterThanOrEqual(1);
+      expect(sawLinearBlock).toBe(false); // fetch failed — no Linear block, no error
+
+      const fresh = await db.query.items.findFirst({ where: eq(items.id, item!.id) });
+      expect(fresh!.context).toContain("fallback idea"); // compile still succeeded
+    });
   });
 });

@@ -27,6 +27,7 @@ Edit `.env`. The essentials:
     capture still stores everything; summaries/embeddings just wait until a key
     is set.
 - `OPENAI_API_KEY=…` — enables semantic search + resonance (embeddings). Optional.
+- `LINEAR_API_KEY=…` — enables Linear issue enrichment in item context compiles. Optional.
 - `HOUSEKEEPER_DAILY_CAP_EUR` — a hard daily spend cap for AI calls (default 1.0).
 
 `.env` never leaves your machine — it is gitignored.

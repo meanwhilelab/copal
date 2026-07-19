@@ -7,6 +7,7 @@ import { recordEvent } from "./audit.js";
 import { sessionTitleSql } from "./display.js";
 import type { EmbeddingProvider } from "./embeddings.js";
 import { enqueueEmbed, type EntityType } from "./jobs.js";
+import { fetchLinearIssue, parseLinearIssueUrl } from "./linear.js";
 import { costMicros, type LlmProvider } from "./llm.js";
 import { createProposal } from "./proposals.js";
 
@@ -338,7 +339,7 @@ async function loadItemConnectionsChronological(db: Db, itemId: string): Promise
 
 const fmtDate = (d: string | null) => (d ? new Date(d).toISOString().slice(0, 10) : "unknown date");
 
-async function handleItemContext(db: Db, provider: LlmProvider, itemId: string) {
+async function handleItemContext(db: Db, provider: LlmProvider, itemId: string, linearApiKey: string | null) {
   const item = await db.query.items.findFirst({ where: eq(items.id, itemId) });
   if (!item) return; // gone — no-op
 
@@ -349,9 +350,29 @@ async function handleItemContext(db: Db, provider: LlmProvider, itemId: string) 
     )
   ).filter((c) => c.text);
 
-  // Nothing declared-linked (or nothing with usable text) — clear any stale
-  // context rather than spend a model call synthesizing from nothing.
-  if (material.length === 0) {
+  // Linear enrichment (optional): if the item's own link points at a Linear
+  // issue and a key is configured, fetch the live issue and fold it into the
+  // material — same idiom as a declared connection. Any failure (unset key,
+  // non-Linear link, network error, deleted issue, ...) silently degrades to
+  // today's behavior: no block, no error.
+  let linearBlock: string | null = null;
+  if (linearApiKey && item.link) {
+    const identifier = parseLinearIssueUrl(item.link);
+    if (identifier) {
+      const issue = await fetchLinearIssue(identifier, linearApiKey);
+      if (issue) {
+        const description = issue.description?.trim() ? issue.description.slice(0, 2000) : "(no description)";
+        linearBlock =
+          `[linear issue] "${issue.identifier} — ${issue.title}" — state ${issue.state}, ` +
+          `updated ${fmtDate(issue.updatedAt)}\n${description}`;
+      }
+    }
+  }
+
+  // Nothing declared-linked and no Linear enrichment (or nothing with usable
+  // text) — clear any stale context rather than spend a model call
+  // synthesizing from nothing.
+  if (material.length === 0 && !linearBlock) {
     if (item.context !== null) {
       await db.transaction(async (tx) => {
         await tx.update(items).set({ context: null, contextCompiledAt: new Date() }).where(eq(items.id, itemId));
@@ -366,13 +387,14 @@ async function handleItemContext(db: Db, provider: LlmProvider, itemId: string) 
     return;
   }
 
-  const linked = material
-    .map(
+  const linked = [
+    ...material.map(
       (c) =>
         `[${c.type}${c.sunk ? ", sunk" : ""}] "${c.title}" — created ${fmtDate(c.created_at)}, ` +
         `linked (${c.link_type}) ${fmtDate(c.link_created_at)}\n${c.text}`,
-    )
-    .join("\n\n---\n\n");
+    ),
+    ...(linearBlock ? [linearBlock] : []),
+  ].join("\n\n---\n\n");
 
   const { text, inputTokens, outputTokens, model } = await provider.complete({
     system:
@@ -467,6 +489,7 @@ export async function housekeeperTick(
   db: Db,
   provider: LlmProvider,
   embedProvider: EmbeddingProvider | null = null,
+  linearApiKey: string | null = null,
   max = 5,
 ): Promise<number> {
   const capMicros = HK.dailyCapEur * 1_000_000;
@@ -488,7 +511,7 @@ export async function housekeeperTick(
       else if (job.kind === "content_catalogue") await handleContentCatalogue(db, provider, job.subject_id);
       else if (job.kind === "embed") await handleEmbed(db, embedProvider!, job.subject_id, job.payload);
       else if (job.kind === "librarian") await handleLibrarian(db, provider, job.subject_id, job.payload);
-      else if (job.kind === "item_context") await handleItemContext(db, provider, job.subject_id);
+      else if (job.kind === "item_context") await handleItemContext(db, provider, job.subject_id, linearApiKey);
       else throw new Error(`unknown job kind ${job.kind}`);
       await db.execute(sql`UPDATE jobs SET status='done', updated_at=now() WHERE id=${job.id}::uuid`);
     } catch (err) {
