@@ -362,9 +362,21 @@ async function handleItemContext(db: Db, provider: LlmProvider, itemId: string, 
       const issue = await fetchLinearIssue(identifier, linearApiKey);
       if (issue) {
         const description = issue.description?.trim() ? issue.description.slice(0, 2000) : "(no description)";
-        linearBlock =
+        // Sub-issues ride along (chronological like everything else the prompt
+        // sees), each capped shorter than the parent so a large epic can't
+        // crowd out the item's own declared material.
+        const children = [...issue.children]
+          .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+          .map(
+            (c) =>
+              `[linear sub-issue] "${c.identifier} — ${c.title}" — state ${c.state}, ` +
+              `updated ${fmtDate(c.updatedAt)}\n${c.description?.trim() ? c.description.slice(0, 800) : "(no description)"}`,
+          );
+        linearBlock = [
           `[linear issue] "${issue.identifier} — ${issue.title}" — state ${issue.state}, ` +
-          `updated ${fmtDate(issue.updatedAt)}\n${description}`;
+            `updated ${fmtDate(issue.updatedAt)}\n${description}`,
+          ...children,
+        ].join("\n\n---\n\n");
       }
     }
   }

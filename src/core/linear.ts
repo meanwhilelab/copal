@@ -22,7 +22,7 @@ export function parseLinearIssueUrl(url: string): string | null {
   return m ? m[1]! : null;
 }
 
-export type LinearIssue = {
+export type LinearSubIssue = {
   identifier: string;
   title: string;
   description: string | null;
@@ -30,21 +30,37 @@ export type LinearIssue = {
   updatedAt: string;
 };
 
+export type LinearIssue = LinearSubIssue & {
+  children: LinearSubIssue[];
+};
+
+const ISSUE_FIELDS = "identifier title description updatedAt state { name }";
 const ISSUE_QUERY =
-  "query($id: String!) { issue(id: $id) { identifier title description updatedAt state { name } } }";
+  `query($id: String!) { issue(id: $id) { ${ISSUE_FIELDS} ` +
+  `children(first: 25) { nodes { ${ISSUE_FIELDS} } } } }`;
+
+type GqlIssueNode = {
+  identifier: string;
+  title: string;
+  description: string | null;
+  updatedAt: string;
+  state: { name: string } | null;
+};
 
 type GraphQlIssueResponse = {
   data?: {
-    issue?: {
-      identifier: string;
-      title: string;
-      description: string | null;
-      updatedAt: string;
-      state: { name: string } | null;
-    } | null;
+    issue?: (GqlIssueNode & { children?: { nodes?: GqlIssueNode[] } | null }) | null;
   };
   errors?: unknown[];
 };
+
+const toSubIssue = (n: GqlIssueNode): LinearSubIssue => ({
+  identifier: n.identifier,
+  title: n.title,
+  description: n.description ?? null,
+  state: n.state?.name ?? "unknown",
+  updatedAt: n.updatedAt,
+});
 
 /** Fetch a Linear issue by identifier (or UUID — Linear's `issue(id:)` resolves
  *  both). Never throws: returns null on a non-200, GraphQL errors, a missing
@@ -73,11 +89,8 @@ export async function fetchLinearIssue(
     const issue = json.data?.issue;
     if (!issue) return null;
     return {
-      identifier: issue.identifier,
-      title: issue.title,
-      description: issue.description ?? null,
-      state: issue.state?.name ?? "unknown",
-      updatedAt: issue.updatedAt,
+      ...toSubIssue(issue),
+      children: (issue.children?.nodes ?? []).map(toSubIssue),
     };
   } catch {
     return null; // network error, abort/timeout, bad JSON, ...

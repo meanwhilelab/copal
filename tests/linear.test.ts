@@ -65,7 +65,47 @@ describe("fetchLinearIssue", () => {
       description: "Some details.",
       state: "In Progress",
       updatedAt: "2026-07-10T12:00:00.000Z",
+      children: [],
     });
+  });
+
+  it("returns sub-issues when the issue has children", async () => {
+    const fetchImpl = (async () => ({
+      ok: true,
+      json: async () => ({
+        data: {
+          issue: {
+            identifier: "NAT-2061",
+            title: "Epic",
+            description: "Parent.",
+            updatedAt: "2026-07-10T12:00:00.000Z",
+            state: { name: "In Progress" },
+            children: {
+              nodes: [
+                {
+                  identifier: "NAT-2062",
+                  title: "First slice",
+                  description: null,
+                  updatedAt: "2026-07-11T09:00:00.000Z",
+                  state: { name: "Todo" },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    })) as unknown as typeof fetch;
+
+    const issue = await fetchLinearIssue("NAT-2061", "test-key", fetchImpl);
+    expect(issue?.children).toEqual([
+      {
+        identifier: "NAT-2062",
+        title: "First slice",
+        description: null,
+        state: "Todo",
+        updatedAt: "2026-07-11T09:00:00.000Z",
+      },
+    ]);
   });
 
   it("returns null on a non-200 response", async () => {

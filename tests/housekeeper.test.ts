@@ -305,6 +305,17 @@ describe("item_context", () => {
                 description: "Cut over the last tenant.",
                 updatedAt: "2026-07-10T00:00:00.000Z",
                 state: { name: "In Progress" },
+                children: {
+                  nodes: [
+                    {
+                      identifier: "NAT-2070",
+                      title: "Backfill the ledger snapshots",
+                      description: "Sub-issue detail.",
+                      updatedAt: "2026-07-11T00:00:00.000Z",
+                      state: { name: "Todo" },
+                    },
+                  ],
+                },
               },
             },
           }),
@@ -312,12 +323,15 @@ describe("item_context", () => {
       );
 
       let sawTitle = false;
+      let sawSubIssue = false;
       const provider = fakeProvider((input) => {
         if (input.user.includes("Ship the payments migration to prod")) sawTitle = true;
+        if (input.user.includes("Backfill the ledger snapshots")) sawSubIssue = true;
         return "Synthesis referencing the live Linear issue.";
       });
       await housekeeperTick(db, provider, null, "test-linear-key");
       expect(sawTitle).toBe(true);
+      expect(sawSubIssue).toBe(true);
 
       const fresh = await db.query.items.findFirst({ where: eq(items.id, item!.id) });
       expect(fresh!.context).not.toBeNull();
