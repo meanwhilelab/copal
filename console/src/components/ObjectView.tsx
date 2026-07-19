@@ -1,6 +1,17 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { useLink, useObject, useRedact, useSearch, useUnlink, useUnsink, useUpdateItem } from "../api/hooks.js";
+import {
+  useCreateShare,
+  useLink,
+  useObject,
+  useRedact,
+  useRevokeShare,
+  useSearch,
+  useShareStatus,
+  useUnlink,
+  useUnsink,
+  useUpdateItem,
+} from "../api/hooks.js";
 import { stripLabel, type ObjectDetail } from "../api/types.js";
 import { SinkGlyph } from "../views/Board.js";
 import { AttachmentsButton } from "./AttachmentsButton.js";
@@ -163,6 +174,61 @@ function ItemDescription({ d }: { d: ObjectDetail }) {
   );
 }
 
+/** Header control for an item's public share link. Not shared → "Share" mints a
+ *  fresh token, copies the URL, and shows it once (the plaintext is never
+ *  retrievable again — the server only ever stores its hash). Shared → the only
+ *  action left is Revoke; re-sharing after that mints a genuinely new URL. */
+function ShareButton({ itemId }: { itemId: string }) {
+  const status = useShareStatus(itemId);
+  const create = useCreateShare();
+  const revoke = useRevokeShare();
+
+  if (status.data?.active) {
+    return (
+      <button
+        title="Revoke this link — the URL can't be re-shown, so sharing again mints a fresh one"
+        onClick={() =>
+          revoke.mutate(itemId, {
+            onSuccess: () => toast("Link revoked."),
+            onError: (e) => toast.error(e instanceof Error ? e.message : "revoke failed"),
+          })
+        }
+        disabled={revoke.isPending}
+        className="text-[0.7188rem] cursor-pointer bg-transparent border rounded-md px-2 py-1 flex items-center gap-1.5 disabled:opacity-50"
+        style={{ borderColor: "var(--amber)", color: "var(--amber)" }}
+      >
+        <span className="w-1.5 h-1.5 rounded-full flex-none" style={{ background: "var(--amber)" }} />
+        Shared · Revoke
+      </button>
+    );
+  }
+
+  return (
+    <button
+      title="Create a public read-only link to this item"
+      disabled={create.isPending || status.isLoading}
+      onClick={() =>
+        create.mutate(itemId, {
+          onSuccess: (res) => {
+            if (res.existing) {
+              toast("Already shared — the link can't be re-shown; revoke to mint a fresh one.");
+              return;
+            }
+            const url = `${location.origin}/s/${res.token}`;
+            navigator.clipboard?.writeText(url).catch(() => {});
+            toast("Link copied — this is the only time it's shown. Revoke to replace it.");
+          },
+          onError: (e) => toast.error(e instanceof Error ? e.message : "share failed"),
+        })
+      }
+      className="text-[0.7188rem] cursor-pointer bg-transparent border rounded-md px-2 py-1 disabled:opacity-50"
+      style={{ borderColor: "var(--line-2)", color: "var(--text-2)" }}
+    >
+      Share
+    </button>
+  );
+}
+
 /**
  * The universal object view — same for an item, idea, session or content.
  * Shows the object, its declared connections and resonances (each navigable),
@@ -242,6 +308,7 @@ export function ObjectView({
             </button>
           )}
           <div className="flex-1" />
+          {d.type === "item" && <ShareButton itemId={d.id} />}
           {d.type === "item" && <AttachmentsButton itemId={d.id} />}
         </div>
         <h1 className="display m-0 font-medium text-[1.375rem] leading-tight">{d.title}</h1>

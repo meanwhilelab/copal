@@ -58,6 +58,8 @@ afterAll(async () => {
   await db.execute(sql`DELETE FROM sessions WHERE client_id = ${writer.id}::uuid`);
   await db.execute(sql`DELETE FROM ideas WHERE created_by_client_id = ${writer.id}::uuid`);
   await db.execute(sql`DELETE FROM contents WHERE created_by_client_id = ${writer.id}::uuid`);
+  // item_shares has no cascade off items — must go before the items delete below.
+  await db.execute(sql`DELETE FROM item_shares WHERE item_id IN (SELECT id FROM items WHERE board_id=${boardId}::uuid)`);
   await db.delete(items).where(eq(items.boardId, boardId));
   await db.delete(boards).where(eq(boards.id, boardId));
   await db.execute(sql`DELETE FROM api_clients WHERE name LIKE ${"con-%" + suffix}`);
@@ -434,5 +436,85 @@ describe("proposals", () => {
     expect(p).toBeDefined();
     expect(p!.from_sunk).toBe(true);
     expect(p!.to_sunk).toBe(false);
+  });
+});
+
+describe("item share links", () => {
+  let shareItemId: string;
+  let shareToken: string;
+  // Bodyless POST/DELETE: no content-type — Fastify's JSON parser 400s a
+  // request that declares application/json but sends no bytes.
+  const authOnly = { authorization: H.authorization };
+
+  it("creates a share once, returning a token; a second create returns existing:true without one", async () => {
+    const [item] = await db
+      .insert(items)
+      .values({
+        boardId,
+        name: `share-item-${suffix}`,
+        status: "open",
+        description: "share me",
+        context: "The Librarian's synthesis of everything linked to this item.",
+        contextCompiledAt: new Date(),
+      })
+      .returning();
+    shareItemId = item!.id;
+
+    const before = await fetch(`${baseUrl}/api/v1/items/${shareItemId}/share`, { headers: H });
+    expect(before.status).toBe(200);
+    expect((await before.json()) as { active: boolean }).toEqual({ active: false });
+
+    const create1 = await fetch(`${baseUrl}/api/v1/items/${shareItemId}/share`, { method: "POST", headers: authOnly });
+    expect(create1.status).toBe(200);
+    const body1 = (await create1.json()) as { existing: boolean; token?: string };
+    expect(body1.existing).toBe(false);
+    expect(body1.token).toBeTruthy();
+    expect(body1.token!.startsWith("cops_")).toBe(true);
+    shareToken = body1.token!;
+
+    const create2 = await fetch(`${baseUrl}/api/v1/items/${shareItemId}/share`, { method: "POST", headers: authOnly });
+    expect(create2.status).toBe(200);
+    const body2 = (await create2.json()) as { existing: boolean; token?: string };
+    expect(body2.existing).toBe(true);
+    expect(body2.token).toBeUndefined();
+
+    const status = await fetch(`${baseUrl}/api/v1/items/${shareItemId}/share`, { headers: H });
+    const statusBody = (await status.json()) as { active: boolean; created_at?: string };
+    expect(statusBody.active).toBe(true);
+    expect(statusBody.created_at).toBeTruthy();
+  });
+
+  it("public GET (no auth header) returns the restricted shape only", async () => {
+    const res = await fetch(`${baseUrl}/api/public/share/${shareToken}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.name).toBe(`share-item-${suffix}`);
+    expect(body.description).toBe("share me");
+    expect(body.context).toContain("The Librarian's synthesis of everything linked to this item.");
+    expect(body.status).toBe("open");
+    expect(body.sunk).toBe(false);
+    // never leaks connections/resonances/other-object ids — identity + description + context only
+    expect(body).not.toHaveProperty("connections");
+    expect(body).not.toHaveProperty("resonances");
+    expect(body).not.toHaveProperty("id");
+    expect(body).not.toHaveProperty("board_id");
+  });
+
+  it("an unknown token 404s with the uniform error shape (no enumeration)", async () => {
+    const res = await fetch(`${baseUrl}/api/public/share/cops_${"a".repeat(43)}`);
+    expect(res.status).toBe(404);
+    expect((await res.json()) as { error: string }).toEqual({ error: "not found" });
+  });
+
+  it("revoking kills the link; the same token now 404s identically to unknown", async () => {
+    const revoke = await fetch(`${baseUrl}/api/v1/items/${shareItemId}/share`, { method: "DELETE", headers: authOnly });
+    expect(revoke.status).toBe(200);
+
+    const res = await fetch(`${baseUrl}/api/public/share/${shareToken}`);
+    expect(res.status).toBe(404);
+    expect((await res.json()) as { error: string }).toEqual({ error: "not found" });
+
+    const status = await fetch(`${baseUrl}/api/v1/items/${shareItemId}/share`, { headers: H });
+    expect((await status.json()) as { active: boolean }).toEqual({ active: false });
   });
 });

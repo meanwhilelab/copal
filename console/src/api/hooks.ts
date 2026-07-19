@@ -6,6 +6,7 @@ import type {
   Capture,
   ContentDetail,
   ContentRow,
+  CreateShareResult,
   DeadJob,
   IdeaDetail,
   IdeaListEntry,
@@ -16,6 +17,7 @@ import type {
   SearchResult,
   SessionDetail,
   SessionRow,
+  ShareStatus,
   Vitals,
   Workspace,
 } from "./types.js";
@@ -276,6 +278,29 @@ export const useUnsink = () => {
       inv.board();
       inv.ideas();
     },
+  });
+};
+
+export const useShareStatus = (itemId: string) =>
+  useQuery({
+    queryKey: ["share", itemId],
+    queryFn: () => api<ShareStatus>(`/items/${itemId}/share`),
+    enabled: !!itemId,
+  });
+
+export const useCreateShare = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (itemId: string) => api<CreateShareResult>(`/items/${itemId}/share`, { method: "POST" }),
+    onSettled: (_r, _e, itemId) => void qc.invalidateQueries({ queryKey: ["share", itemId] }),
+  });
+};
+
+export const useRevokeShare = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (itemId: string) => api(`/items/${itemId}/share`, { method: "DELETE" }),
+    onSettled: (_r, _e, itemId) => void qc.invalidateQueries({ queryKey: ["share", itemId] }),
   });
 };
 

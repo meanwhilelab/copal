@@ -41,6 +41,12 @@ import { acceptProposal, dismissProposal, listProposals } from "../core/proposal
 import { embeddingProviderFromEnv } from "../core/embeddings.js";
 import { search, type SearchMode, type SearchType } from "../core/search.js";
 import { saveSession } from "../core/sessions.js";
+import {
+  createItemShare,
+  getPublicItemByToken,
+  getShareStatus,
+  revokeItemShare,
+} from "../core/shares.js";
 import { getStatus, getVitals } from "../core/vitals.js";
 import { resolveWorkspace } from "../core/workspaces.js";
 import type { Db } from "../db/client.js";
@@ -88,8 +94,11 @@ export async function buildApp(db: Db) {
     timeWindow: config.rateLimit.windowMs,
     // Key per credential (token), falling back to real client IP for anonymous
     // requests. Runs at onRequest, before auth resolves req.apiClient, so we read
-    // the token straight off the request.
-    keyGenerator: (req) => bearerFrom(req) ?? req.ip,
+    // the token straight off the request. The public share endpoint carries no
+    // credential — its :token path param is share-specific, not a client bearer —
+    // so key it by IP; otherwise many share links from one visitor would each get
+    // their own budget instead of sharing one.
+    keyGenerator: (req) => (req.url.startsWith("/api/public/") ? req.ip : bearerFrom(req) ?? req.ip),
     allowList: (req) => req.url === "/healthz" || req.url === "/status",
   });
 
@@ -128,10 +137,24 @@ export async function buildApp(db: Db) {
     return s;
   });
 
+  // Public, unauthenticated item share reads — `/s/<token>` in the console
+  // fetches this directly. Deliberately outside /api/v1: exempted from the auth
+  // preHandler below by the /api/public/ prefix, never touches req.apiClient.
+  // Uniform 404 for "no such token" and "revoked" — never let a caller
+  // distinguish the two (no enumeration of live vs dead links).
+  app.get("/api/public/share/:token", async (req, reply) => {
+    const { token } = req.params as { token: string };
+    const item = await getPublicItemByToken(db, token);
+    if (!item) return reply.code(404).send({ error: "not found" });
+    return item;
+  });
+
   // Authentication for the data surfaces only; the SPA shell (unlock screen +
   // static assets) is public — every byte of corpus data stays behind /api|/mcp.
+  // /api/public/ is the one deliberate exception (see the share route above).
   app.addHook("preHandler", async (req, reply) => {
     if (!req.url.startsWith("/api/") && !req.url.startsWith("/mcp")) return;
+    if (req.url.startsWith("/api/public/")) return;
     const client = await authenticate(db, bearerFrom(req));
     if (!client) {
       // Uniform 401; never distinguish unknown vs revoked to callers.
@@ -356,6 +379,25 @@ export async function buildApp(db: Db) {
     if (b.link !== undefined) patch.link = b.link;
     if (b.due_date !== undefined) patch.dueDate = b.due_date;
     return conflictAware(reply, () => updateItem(db, id, b.expected_version, patch as ItemPatch, req.apiClient));
+  });
+
+  // ---- item share links (public read-only links; management needs write scope) --
+  app.post("/api/v1/items/:id/share", async (req, reply) => {
+    if (!requireWrite(req, reply)) return;
+    const { id } = req.params as { id: string };
+    const result = await createItemShare(db, id, req.apiClient!);
+    return result.existing
+      ? { existing: true, created_at: result.share.createdAt }
+      : { existing: false, token: result.token, created_at: result.share.createdAt };
+  });
+  app.delete("/api/v1/items/:id/share", async (req, reply) => {
+    if (!requireWrite(req, reply)) return;
+    const { id } = req.params as { id: string };
+    return revokeItemShare(db, id, req.apiClient!);
+  });
+  app.get("/api/v1/items/:id/share", async (req) => {
+    const { id } = req.params as { id: string };
+    return getShareStatus(db, id);
   });
 
   app.post("/api/v1/sink", async (req, reply) => {

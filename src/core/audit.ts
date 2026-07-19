@@ -22,7 +22,9 @@ export type AuditAction =
   | "adopt"
   | "close"
   | "dismiss"
-  | "delete";
+  | "delete"
+  | "share"
+  | "unshare";
 
 export type AuditEntityType =
   | "board"
