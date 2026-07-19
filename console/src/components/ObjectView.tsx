@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { useLink, useObject, useRedact, useSearch, useUnlink, useUnsink } from "../api/hooks.js";
+import { useLink, useObject, useRedact, useSearch, useUnlink, useUnsink, useUpdateItem } from "../api/hooks.js";
 import { stripLabel, type ObjectDetail } from "../api/types.js";
 import { SinkGlyph } from "../views/Board.js";
 import { AttachmentsButton } from "./AttachmentsButton.js";
@@ -78,6 +78,88 @@ function LinkPicker({ obj, onDone }: { obj: ObjectDetail; onDone: () => void }) 
         )}
       </div>
     </div>
+  );
+}
+
+/** Inline-editable item description — the lens the Librarian reads linked material through. */
+function ItemDescription({ d }: { d: ObjectDetail }) {
+  const update = useUpdateItem();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const meta = d.meta as Record<string, unknown>;
+  const commit = () => {
+    setEditing(false);
+    const next = draft.trim();
+    if (next === (d.body ? stripLabel(d.body) : "").trim()) return;
+    update.mutate(
+      { id: d.id, expected_version: meta.version as number, description: next || null },
+      { onError: (e) => toast.error(e instanceof Error ? e.message : "write failed") },
+    );
+  };
+  if (editing) {
+    return (
+      <div className="mb-5 flex flex-col gap-2">
+        <textarea
+          autoFocus
+          value={draft}
+          rows={6}
+          placeholder="Describe this item — the lens through which its linked material is read…"
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setEditing(false);
+          }}
+          className="text-[0.7813rem] rounded-md border px-2.5 py-2 outline-none resize-y"
+          style={{ background: "var(--ground)", borderColor: "var(--amber)", color: "var(--text)" }}
+        />
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={() => setEditing(false)}
+            className="text-[0.7188rem] px-2.5 py-1 rounded-md cursor-pointer bg-transparent border"
+            style={{ borderColor: "var(--line-2)", color: "var(--text-2)" }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={commit}
+            className="text-[0.7188rem] font-bold px-2.5 py-1 rounded-md border-0 cursor-pointer"
+            style={{ background: "var(--amber)", color: "#1a1206" }}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    );
+  }
+  const start = () => {
+    setDraft(d.body ? stripLabel(d.body) : "");
+    setEditing(true);
+  };
+  return d.body ? (
+    <div className="mb-5 group/desc">
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <Markdown>{stripLabel(d.body)}</Markdown>
+        </div>
+        <button
+          title="Edit description"
+          onClick={start}
+          className="flex-none w-6 h-6 grid place-items-center rounded-md border-0 bg-transparent cursor-pointer opacity-0 group-hover/desc:opacity-100 transition-opacity"
+          style={{ color: "var(--text-3)" }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  ) : (
+    <button
+      onClick={start}
+      className="mb-5 text-left text-[0.7813rem] cursor-pointer bg-transparent border-0 p-0"
+      style={{ color: "var(--text-3)" }}
+    >
+      + description
+    </button>
   );
 }
 
@@ -167,7 +249,9 @@ export function ObjectView({
       </div>
 
       <div className="flex-1 overflow-auto px-6 py-5">
-        {d.body ? (
+        {d.type === "item" ? (
+          <ItemDescription d={d} />
+        ) : d.body ? (
           <div className="mb-5">
             <Markdown>{stripLabel(d.body)}</Markdown>
           </div>
