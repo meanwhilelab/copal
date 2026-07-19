@@ -41,7 +41,7 @@ async function loadNative(db: Db, type: ObjectType, id: string) {
   if (type === "item") {
     const r = await one(
       db,
-      sql`SELECT i.name, i.description, i.context, i.context_compiled_at, i.status, i.lane, i.priority, i.progress, i.due_date, i.sunk_at, i.board_id, i.version, b.name AS board
+      sql`SELECT i.name, i.description, i.context, i.context_compiled_at, i.status, i.lane, i.priority, i.progress, i.due_date, i.link, i.sunk_at, i.board_id, i.version, b.name AS board
           FROM items i JOIN boards b ON b.id=i.board_id WHERE i.id=${id}::uuid`,
     );
     if (!r) throw new NotFoundError(`item ${id}`);
@@ -56,6 +56,7 @@ async function loadNative(db: Db, type: ObjectType, id: string) {
         priority: r.priority,
         progress: r.progress,
         due_date: r.due_date,
+        link: r.link,
         board: r.board,
         board_id: r.board_id,
         context: r.context ? labelDerived(r.context as string, "machine-summary") : null,

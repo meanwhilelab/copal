@@ -303,6 +303,30 @@ describe("item description + compiled context", () => {
     expect(pending.rows.length).toBe(1);
   });
 
+  it("POST /items/:id/recompile-context enqueues manually and dedupes with pending", async () => {
+    const [item] = await db
+      .insert(items)
+      .values({ boardId, name: `rebuild-ctx-item-${suffix}`, status: "open" })
+      .returning();
+
+    const first = await fetch(`${baseUrl}/api/v1/items/${item!.id}/recompile-context`, { method: "POST", headers: H, body: "{}" });
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ enqueued: true });
+    await fetch(`${baseUrl}/api/v1/items/${item!.id}/recompile-context`, { method: "POST", headers: H, body: "{}" });
+
+    const pending = await db.execute(
+      sql`SELECT id FROM jobs WHERE kind='item_context' AND subject_id=${item!.id}::uuid AND status='pending'`,
+    );
+    expect(pending.rows.length).toBe(1);
+
+    const missing = await fetch(`${baseUrl}/api/v1/items/00000000-0000-0000-0000-000000000000/recompile-context`, {
+      method: "POST",
+      headers: H,
+      body: "{}",
+    });
+    expect(missing.status).toBe(404);
+  });
+
   it("a compiled context surfaces in GET /api/v1/object/item/:id", async () => {
     const [item] = await db
       .insert(items)
@@ -320,6 +344,23 @@ describe("item description + compiled context", () => {
     };
     expect(obj.meta.context).toContain("The Librarian's synthesis of everything linked to this item.");
     expect(obj.meta.context_compiled_at).toBeTruthy();
+  });
+
+  it("GET /api/v1/object/item/:id returns the item's link", async () => {
+    const [item] = await db
+      .insert(items)
+      .values({
+        boardId,
+        name: `link-meta-item-${suffix}`,
+        status: "open",
+        link: "https://linear.app/copal/issue/COP-42/ship-the-thing",
+      })
+      .returning();
+
+    const obj = (await (await fetch(`${baseUrl}/api/v1/object/item/${item!.id}`, { headers: H })).json()) as {
+      meta: { link: string | null };
+    };
+    expect(obj.meta.link).toBe("https://linear.app/copal/issue/COP-42/ship-the-thing");
   });
 });
 

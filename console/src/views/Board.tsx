@@ -48,7 +48,7 @@ const priColor = (p: string | null) =>
 
 const GRID = "minmax(200px,1.4fr) 140px 104px 88px 120px minmax(140px,1fr) minmax(180px,1.6fr) 96px";
 
-type Ctx = {
+export type Ctx = {
   laneMap: Map<string, SetEntry>;
   statusMap: Map<string, SetEntry>;
   statuses: SetEntry[];
@@ -163,7 +163,7 @@ function NameCell({ item, ctx }: { item: Item; ctx: Ctx }) {
   );
 }
 
-function StatusDot({ item, ctx }: { item: Item; ctx: Ctx }) {
+export function StatusDot({ item, ctx }: { item: Item; ctx: Ctx }) {
   const entry = ctx.statusMap.get(item.status);
   const color = entry?.color ?? "var(--st-neutral)";
   return (
@@ -227,7 +227,7 @@ const PRIORITIES = [
 
 const PRIORITY_LABEL: Record<string, string> = { alta: "High", media: "Medium", bassa: "Low", normale: "Medium" };
 
-function LaneCell({ item, ctx }: { item: Item; ctx: Ctx }) {
+export function LaneCell({ item, ctx }: { item: Item; ctx: Ctx }) {
   const lane = item.lane ? ctx.laneMap.get(item.lane) : undefined;
   const commit = commitFor(item, ctx);
   const c = lane?.color ?? "var(--amber)";
@@ -279,7 +279,7 @@ function LaneCell({ item, ctx }: { item: Item; ctx: Ctx }) {
   );
 }
 
-function PriorityCell({ item, ctx }: { item: Item; ctx: Ctx }) {
+export function PriorityCell({ item, ctx }: { item: Item; ctx: Ctx }) {
   const p = item.priority ?? "media";
   const commit = commitFor(item, ctx);
   return (
@@ -312,7 +312,7 @@ function PriorityCell({ item, ctx }: { item: Item; ctx: Ctx }) {
   );
 }
 
-function DueCell({ item, ctx }: { item: Item; ctx: Ctx }) {
+export function DueCell({ item, ctx }: { item: Item; ctx: Ctx }) {
   const commit = commitFor(item, ctx);
   const soon = dueSoon(item.dueDate);
   return (
@@ -347,7 +347,7 @@ function DueCell({ item, ctx }: { item: Item; ctx: Ctx }) {
   );
 }
 
-function ProgressCell({ item, ctx }: { item: Item; ctx: Ctx }) {
+export function ProgressCell({ item, ctx }: { item: Item; ctx: Ctx }) {
   const commit = commitFor(item, ctx);
   const [val, setVal] = useState(item.progress);
   useEffect(() => setVal(item.progress), [item.progress]);
@@ -425,7 +425,7 @@ function hostname(u: string) {
 
 // A link is a first-class field, distinct from a free-text note. It unfurls:
 // Linear URLs → issue chip (see parseLinear); any other URL → a hostname chip.
-function LinkCell({ item, ctx }: { item: Item; ctx: Ctx }) {
+export function LinkCell({ item, ctx }: { item: Item; ctx: Ctx }) {
   const commit = commitFor(item, ctx);
   const [draft, setDraft] = useState(item.link ?? "");
   const [open, setOpen] = useState(false);

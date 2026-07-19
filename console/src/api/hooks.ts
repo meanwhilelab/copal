@@ -259,6 +259,14 @@ export const useUpdateItem = () => {
   });
 };
 
+export const useRecompileContext = () => {
+  const inv = useInvalidate();
+  return useMutation({
+    mutationFn: (itemId: string) => api(`/items/${itemId}/recompile-context`, { method: "POST" }),
+    onSettled: () => inv.object(),
+  });
+};
+
 export const useSink = () => {
   const inv = useInvalidate();
   return useMutation({

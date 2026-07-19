@@ -1,19 +1,31 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
+  useBoard,
   useCreateShare,
   useLink,
   useObject,
+  useRecompileContext,
   useRedact,
   useRevokeShare,
   useSearch,
   useShareStatus,
+  useSink,
   useUnlink,
   useUnsink,
   useUpdateItem,
 } from "../api/hooks.js";
-import { stripLabel, type ObjectDetail } from "../api/types.js";
-import { SinkGlyph } from "../views/Board.js";
+import { stripLabel, type Item, type ObjectDetail } from "../api/types.js";
+import {
+  DueCell,
+  LaneCell,
+  LinkCell,
+  PriorityCell,
+  ProgressCell,
+  SinkGlyph,
+  StatusDot,
+  type Ctx,
+} from "../views/Board.js";
 import { AttachmentsButton } from "./AttachmentsButton.js";
 import { Markdown } from "./Markdown.js";
 
@@ -89,6 +101,28 @@ function LinkPicker({ obj, onDone }: { obj: ObjectDetail; onDone: () => void }) 
         )}
       </div>
     </div>
+  );
+}
+
+/** Manually re-enqueue the item_context compile — for when things changed a lot
+ *  and you don't want to wait for (or rely on) the automatic triggers. */
+function RebuildContextButton({ itemId }: { itemId: string }) {
+  const rebuild = useRecompileContext();
+  return (
+    <button
+      title="Ask the Librarian to recompile this item's context now"
+      onClick={() =>
+        rebuild.mutate(itemId, {
+          onSuccess: () => toast("Context rebuild queued — recompiles within a minute."),
+          onError: (e) => toast.error(e instanceof Error ? e.message : "queue failed"),
+        })
+      }
+      disabled={rebuild.isPending}
+      className="mono text-[0.625rem] px-1.5 py-0.5 rounded cursor-pointer border disabled:opacity-50"
+      style={{ borderColor: "var(--line-2)", color: "var(--amber)", background: "transparent" }}
+    >
+      ⟳ rebuild
+    </button>
   );
 }
 
@@ -283,6 +317,105 @@ function ShareButton({ itemId }: { itemId: string }) {
   );
 }
 
+/** A single editable property, always bordered so the affordance reads at
+ *  rest — no hover-only reveals (an explicit lesson from the board). */
+function PropChip({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div
+      className="inline-flex items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-full border"
+      style={{ borderColor: "var(--line)", background: "var(--surface)" }}
+    >
+      <span className="kicker">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+/** The item's status/lane/priority/due/progress/link, editable right on the
+ *  leaf page — the same controls and optimistic-concurrency semantics as the
+ *  board, reused via export rather than reimplemented. Board name is shown
+ *  plain (a board move isn't a property edit here). */
+function ItemProperties({ d }: { d: ObjectDetail }) {
+  const meta = d.meta as Record<string, unknown>;
+  const boardId = (meta.board_id as string) ?? null;
+  const detail = useBoard(boardId, false);
+  const update = useUpdateItem();
+  const sink = useSink();
+  const unsink = useUnsink();
+
+  const statuses = detail.data?.board.statusSet ?? [];
+  const lanes = detail.data?.board.laneSet ?? [];
+  const statusMap = new Map(statuses.map((s) => [s.key, s]));
+  const laneMap = new Map(lanes.map((l) => [l.key, l]));
+
+  if (!detail.data) {
+    // Pre-load fallback — same info the properties row will show, just static.
+    return (
+      <div className="mono text-[0.6563rem] mt-1.5" style={{ color: "var(--text-3)" }}>
+        {[meta.board, meta.status, meta.lane, meta.priority].filter(Boolean).join(" · ")}
+      </div>
+    );
+  }
+
+  const item: Item = {
+    id: d.id,
+    boardId: boardId ?? "",
+    name: d.title,
+    lane: (meta.lane as string) ?? null,
+    priority: (meta.priority as string) ?? null,
+    status: meta.status as string,
+    progress: (meta.progress as number) ?? 0,
+    dueDate: (meta.due_date as string) ?? null,
+    description: null,
+    link: (meta.link as string) ?? null,
+    version: meta.version as number,
+    sunkAt: null,
+  };
+
+  const ctx: Ctx = {
+    laneMap,
+    statusMap,
+    statuses,
+    editing: null,
+    setEditing: () => {},
+    update,
+    sink,
+    unsink,
+    onOpenObject: () => {},
+    settleId: null,
+    settle: () => {},
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 mt-2">
+      <span className="mono text-[0.6875rem]" style={{ color: "var(--text-3)" }}>{meta.board as string}</span>
+      <PropChip label="Status">
+        <StatusDot item={item} ctx={ctx} />
+        <span className="text-[0.75rem]" style={{ color: "var(--text-2)" }}>{statusMap.get(item.status)?.label ?? item.status}</span>
+      </PropChip>
+      <PropChip label="Lane">
+        <LaneCell item={item} ctx={ctx} />
+      </PropChip>
+      <PropChip label="Priority">
+        <PriorityCell item={item} ctx={ctx} />
+      </PropChip>
+      <PropChip label="Due">
+        <DueCell item={item} ctx={ctx} />
+      </PropChip>
+      <PropChip label="Progress">
+        <div style={{ width: 90 }}>
+          <ProgressCell item={item} ctx={ctx} />
+        </div>
+      </PropChip>
+      <PropChip label="Link">
+        <div className="max-w-[220px]">
+          <LinkCell item={item} ctx={ctx} />
+        </div>
+      </PropChip>
+    </div>
+  );
+}
+
 /**
  * The universal object view — same for an item, idea, session or content.
  * Shows the object, its declared connections and resonances (each navigable),
@@ -311,13 +444,11 @@ export function ObjectView({
 
   const meta = d.meta as Record<string, unknown>;
   const metaLine =
-    d.type === "item"
-      ? `${meta.board ?? ""} · ${meta.status ?? ""}${meta.lane ? " · " + meta.lane : ""}${meta.priority ? " · " + meta.priority : ""}`
-      : d.type === "idea"
-        ? `${meta.warmth ?? ""} · ${meta.touch_count ?? 0} touches`
-        : d.type === "session"
-          ? `${meta.closed ? "closed" : "open"}${meta.redacted ? " · redacted" : ""}`
-          : `${meta.source_type ?? ""}${meta.redacted ? " · redacted" : ""}`;
+    d.type === "idea"
+      ? `${meta.warmth ?? ""} · ${meta.touch_count ?? 0} touches`
+      : d.type === "session"
+        ? `${meta.closed ? "closed" : "open"}${meta.redacted ? " · redacted" : ""}`
+        : `${meta.source_type ?? ""}${meta.redacted ? " · redacted" : ""}`;
 
   const connectionRow = (c: ObjectDetail["connections"][number]) => (
     <div
@@ -370,7 +501,11 @@ export function ObjectView({
         ) : (
           <h1 className="display m-0 font-medium text-[1.375rem] leading-tight">{d.title}</h1>
         )}
-        <div className="mono text-[0.6563rem] mt-1.5" style={{ color: "var(--text-3)" }}>{metaLine}</div>
+        {d.type === "item" ? (
+          <ItemProperties d={d} />
+        ) : (
+          <div className="mono text-[0.6563rem] mt-1.5" style={{ color: "var(--text-3)" }}>{metaLine}</div>
+        )}
       </div>
 
       <div className="flex-1 overflow-auto px-6 py-5">
@@ -388,6 +523,7 @@ export function ObjectView({
               <h3 className="kicker m-0">Context</h3>
               <span className="kicker" style={{ color: "var(--text-3)" }}>the Librarian's reading</span>
               <div className="flex-1 h-px" style={{ background: "var(--line)" }} />
+              <RebuildContextButton itemId={d.id} />
             </div>
             <div className="rounded-[9px] border border-dashed px-3 py-2.5" style={{ borderColor: "var(--line-2)", background: "var(--ground)" }}>
               <Markdown>{stripLabel(meta.context as string)}</Markdown>

@@ -31,6 +31,7 @@ import {
 import { NotFoundError } from "../core/errors.js";
 import {
   createItem,
+  requestContextRebuild,
   updateItem,
   BoardSetValidationError,
   VersionConflictError,
@@ -524,6 +525,14 @@ export async function buildApp(db: Db) {
   app.get("/api/v1/items/:id/share", async (req) => {
     const { id } = req.params as { id: string };
     return getShareStatus(db, id);
+  });
+
+  // Manual "Rebuild context" — same job the automatic triggers enqueue; the
+  // pending-jobs unique index collapses this with any recompile already queued.
+  app.post("/api/v1/items/:id/recompile-context", async (req, reply) => {
+    if (!requireWrite(req, reply)) return;
+    const { id } = req.params as { id: string };
+    return requestContextRebuild(db, id);
   });
 
   app.post("/api/v1/sink", async (req, reply) => {
