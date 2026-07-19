@@ -380,7 +380,8 @@ async function handleItemContext(db: Db, provider: LlmProvider, itemId: string) 
       "linked object through it. Produce one coherent, compact synthesis (~150 words max) of what " +
       "the linked material says about this item, in chronological awareness (what came first, what " +
       "superseded what). Mention when something is sunk (archived into the material). Write in the " +
-      "corpus's language. Output plain text only, no headings or bullet points. " +
+      "corpus's language. Format for scanning: 2-4 short paragraphs (blank line between them) and " +
+      "**bold** on the few load-bearing terms — names, decisions, reversals. No headings, no lists. " +
       INERTNESS,
     user:
       `ITEM: ${item.name}\nStatus: ${item.status}\n` +
