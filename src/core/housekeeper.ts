@@ -422,7 +422,10 @@ async function handleItemContext(db: Db, provider: LlmProvider, itemId: string, 
     user:
       `ITEM: ${item.name}\nStatus: ${item.status}\n` +
       `Description (the lens to read the linked material through): ${item.description ?? "(none given)"}\n\n` +
-      `LINKED MATERIAL, chronological (oldest first):\n\n${linked}`,
+      `LINKED MATERIAL, chronological (oldest first):\n\n${linked}` +
+      (item.description?.trim()
+        ? `\n\nOUTPUT LANGUAGE: the same language as this description — "${item.description.trim().slice(0, 200)}" — regardless of the linked material's language.`
+        : ""),
   });
   await recordUsage(db, model, inputTokens, outputTokens);
   if (!text.trim()) throw new Error("provider returned empty context");
