@@ -21,13 +21,14 @@ Two regimes joined by one link graph:
 - **A rigid spine** — boards of work items with declared statuses (a monday.com-style tracker). Work *has* state.
 - **A fluid material** — ideas, conversation sessions, and captured content. Thoughts *flow*; they have no status column, just a trail.
 
-And one promise: **nothing is ever deleted.** Entities can *sink* out of the foreground but stay in the corpus forever — searchable, embeddable, and resurfaceable. Declared state is dangerous for thoughts and correct for work; Copal makes that literal.
+And one promise: **nothing is ever deleted.** Entities can *sink* out of the foreground but stay in the corpus forever — searchable, embeddable, and resurfaceable. Sunk material stays *visible*, too: everywhere it surfaces — connections, search, proposals — it's rendered distinctly, present but marked as *in the material*. Declared state is dangerous for thoughts and correct for work; Copal makes that literal.
 
 ## Features
 
 - 🧠 **One memory, many clients.** A single **MCP** + REST surface. Point Claude, ChatGPT, an agent framework, or a script at it — none of them owns your memory.
 - 🔗 **Everything is a linkable object.** Ideas, items, sessions, and content connect to anything; explore your knowledge as a graph.
-- 🔎 **Semantic search + resonance.** Every capture self-embeds (**pgvector**, HNSW cosine); a nightly **Librarian** surfaces *discovered* connections between related material as advisory suggestions.
+- 🔎 **Semantic search + resonance.** Every capture self-embeds (**pgvector**, HNSW cosine); a nightly **Librarian** surfaces *discovered* connections between related material as advisory suggestions — proposals touching sunk material get their own quieter band ("from the material"), where accepting one can resurrect it.
+- 🧭 **The Librarian reads your item's material for you.** A work item's **description** is your framing — the lens. From it, the Librarian compiles the item's **Context**: a chronological synthesis of everything linked to the item (what came first, what superseded what, what has sunk), recompiled automatically as links and descriptions change, and handed to any agent that resumes on the item via `get_context`.
 - 🪶 **A calm background worker.** The **Housekeeper** distills conversation transcripts into resumable handoff summaries and catalogues content — on a configurable model chain with automatic failover and a hard daily spend cap.
 - 📝 **Markdown-native reader**, board drag-and-drop, inline-editable cells, file attachments, and a clean Linear-style console.
 - 🧾 **Append-only audit log** — every mutation records *who / what / when* (metadata-only, so secrets in free text never land in the log).
