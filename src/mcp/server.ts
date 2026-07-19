@@ -118,7 +118,8 @@ export function buildMcpServer(db: Db, client: AuthedClient): McpServer {
         lane: z.string().optional(),
         priority: z.string().optional(),
         due_date: z.string().optional().describe("YYYY-MM-DD"),
-        note: z.string().optional(),
+        description: z.string().optional(),
+        note: z.string().optional().describe("deprecated alias for `description`"),
         idempotency_key: z.string().optional(),
       },
     },
@@ -147,7 +148,8 @@ export function buildMcpServer(db: Db, client: AuthedClient): McpServer {
         priority: z.string().optional(),
         progress: z.number().int().min(0).max(100).optional(),
         due_date: z.string().optional(),
-        note: z.string().optional(),
+        description: z.string().optional(),
+        note: z.string().optional().describe("deprecated alias for `description`"),
         idempotency_key: z.string().optional(),
       },
     },
@@ -217,7 +219,7 @@ export function buildMcpServer(db: Db, client: AuthedClient): McpServer {
     "promote_idea",
     {
       description:
-        "Graduate an idea into a board item (work). The idea sinks (trail preserved, linked via 'became'); its description is copied to the item note. Idempotent.",
+        "Graduate an idea into a board item (work). The idea sinks (trail preserved, linked via 'became'); its description is copied to the item description. Idempotent.",
       inputSchema: {
         idea_id: z.string().uuid(),
         board_id: z.string().uuid(),

@@ -154,7 +154,7 @@ export async function promoteIdea(
         name: input.name ?? idea.title,
         status,
         lane: input.lane,
-        note: idea.description ?? undefined, // description survives the sink
+        description: idea.description ?? undefined, // description survives the sink
         createdByClientId: client.id,
       },
       client, // the promoting client is the item's real creator, not system

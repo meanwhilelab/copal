@@ -4,9 +4,18 @@ import { boards, items } from "../db/schema.js";
 import { recordEvent } from "./audit.js";
 import type { AuthedClient } from "./auth.js";
 import { NotFoundError } from "./errors.js";
-import { enqueueEmbed } from "./jobs.js";
+import { enqueueEmbed, enqueueItemContext } from "./jobs.js";
 
 export { NotFoundError };
+
+/** `note` is a deprecated alias for `description` — kept for API compatibility;
+ *  `description` wins when both are present. */
+function resolveDescriptionAlias<T extends { note?: string; description?: string }>(
+  input: T,
+): Omit<T, "note" | "description"> & { description?: string } {
+  const { note, description, ...rest } = input;
+  return { ...rest, description: description !== undefined ? description : note };
+}
 
 export async function createItem(
   db: Db,
@@ -18,7 +27,8 @@ export async function createItem(
     priority?: string;
     progress?: number;
     dueDate?: string;
-    note?: string;
+    description?: string;
+    note?: string; // deprecated alias for `description`
     link?: string;
     createdByClientId?: string;
   },
@@ -28,10 +38,11 @@ export async function createItem(
   if (!board) throw new NotFoundError(`board ${boardId}`);
   const status = input.status ?? firstNonTerminalStatus(board);
   validateAgainstBoardSets(board, { status, lane: input.lane });
+  const values = resolveDescriptionAlias(input);
   return db.transaction(async (tx) => {
     const [row] = await tx
       .insert(items)
-      .values({ boardId, ...input, status })
+      .values({ boardId, ...values, status })
       .returning();
     await enqueueEmbed(tx as unknown as Db, "item", row!.id);
     await recordEvent(tx as unknown as Db, actor ?? null, {
@@ -88,7 +99,8 @@ export type ItemPatch = Partial<{
   status: string;
   progress: number;
   dueDate: string;
-  note: string;
+  description: string;
+  note: string; // deprecated alias for `description`
   link: string;
 }>;
 
@@ -110,10 +122,11 @@ export async function updateItem(
     if (!board) throw new Error(`board ${item.boardId} not found`);
     validateAgainstBoardSets(board, patch);
   }
+  const set = resolveDescriptionAlias(patch);
   return db.transaction(async (tx) => {
     const [row] = await tx
       .update(items)
-      .set({ ...patch, version: expectedVersion + 1 })
+      .set({ ...set, version: expectedVersion + 1 })
       .where(and(eq(items.id, itemId), eq(items.version, expectedVersion)))
       .returning();
     if (!row) {
@@ -122,9 +135,14 @@ export async function updateItem(
       if (!exists) throw new NotFoundError(`item ${itemId}`);
       throw new VersionConflictError(itemId);
     }
-    // Re-embed only when embeddable text (name/note) actually changed.
-    if (patch.name !== undefined || patch.note !== undefined) {
+    // Re-embed only when embeddable text (name/description) actually changed.
+    if (set.name !== undefined || set.description !== undefined) {
       await enqueueEmbed(tx as unknown as Db, "item", itemId);
+    }
+    // The description is the lens the Librarian reads the item's connections
+    // through — a change invalidates the compiled context.
+    if (set.description !== undefined) {
+      await enqueueItemContext(tx as unknown as Db, itemId);
     }
     await recordEvent(tx as unknown as Db, actor ?? null, {
       action: "update",

@@ -46,7 +46,7 @@ const dueSoon = (iso: string | null) => {
 const priColor = (p: string | null) =>
   p === "alta" ? "var(--pri-alta)" : p === "bassa" ? "var(--pri-bassa)" : "var(--pri-media)";
 
-const GRID = "minmax(200px,1.4fr) 140px 104px 88px 120px minmax(140px,1fr) minmax(150px,1.1fr) 96px";
+const GRID = "minmax(200px,1.4fr) 140px 104px 88px 120px minmax(140px,1fr) minmax(180px,1.6fr) 96px";
 
 type Ctx = {
   laneMap: Map<string, SetEntry>;
@@ -79,10 +79,11 @@ function LinkCountBadge({ item, ctx }: { item: Item; ctx: Ctx }) {
   const total = counts ? Object.values(counts).reduce((a, b) => a + b, 0) : 0;
   if (total === 0) return null;
   const plural: Record<string, string> = { idea: "ideas", item: "items", session: "sessions", content: "contents" };
-  const breakdown = Object.entries(counts!)
-    .sort((a, b) => b[1] - a[1])
-    .map(([type, n]) => `${n} ${n === 1 ? type : (plural[type] ?? `${type}s`)}`)
-    .join(" · ");
+  const breakdown =
+    Object.entries(counts!)
+      .sort((a, b) => b[1] - a[1])
+      .map(([type, n]) => `${n} ${n === 1 ? type : (plural[type] ?? `${type}s`)}`)
+      .join(" · ") + (item.sunkLinkCount ? ` · ${item.sunkLinkCount} in the material` : "");
   return (
     <button
       onClick={() => ctx.onOpenObject("item", item.id)}
@@ -517,24 +518,27 @@ function LinkCell({ item, ctx }: { item: Item; ctx: Ctx }) {
   );
 }
 
-function NoteCell({ item, ctx }: { item: Item; ctx: Ctx }) {
+// The description is the human's intent for this item — it's also the lens the
+// Librarian reads the item's linked material through (see the Context band in
+// ObjectView), so it gets a wider, more inviting editor than a plain note would.
+function DescriptionCell({ item, ctx }: { item: Item; ctx: Ctx }) {
   const commit = commitFor(item, ctx);
-  const [draft, setDraft] = useState(item.note ?? "");
-  useEffect(() => setDraft(item.note ?? ""), [item.note]);
+  const [draft, setDraft] = useState(item.description ?? "");
+  useEffect(() => setDraft(item.description ?? ""), [item.description]);
   return (
     <Popover.Root>
       <Popover.Trigger asChild>
-        <button className="pr-2.5 text-xs truncate block text-left w-full cursor-text bg-transparent border-0" style={{ color: item.note ? "var(--text-2)" : "var(--text-3)" }}>
-          {item.note ? item.note : "+ note"}
+        <button className="pr-2.5 text-xs truncate block text-left w-full cursor-text bg-transparent border-0" style={{ color: item.description ? "var(--text-2)" : "var(--text-3)" }}>
+          {item.description ? item.description : "+ description"}
         </button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content sideOffset={6} className={`${POP} p-2.5 w-[300px] flex flex-col gap-2`} style={POP_STYLE}>
+        <Popover.Content sideOffset={6} className={`${POP} p-2.5 w-[420px] flex flex-col gap-2`} style={POP_STYLE}>
           <textarea
             autoFocus
             value={draft}
-            rows={4}
-            placeholder="A note on this item…"
+            rows={6}
+            placeholder="What is this item, really? This framing guides how the Librarian reads everything connected to it…"
             onChange={(e) => setDraft(e.target.value)}
             className="text-[0.7813rem] rounded-md border px-2 py-1.5 outline-none resize-none"
             style={{ background: "var(--ground)", borderColor: "var(--line)", color: "var(--text)" }}
@@ -542,7 +546,7 @@ function NoteCell({ item, ctx }: { item: Item; ctx: Ctx }) {
           <div className="flex justify-end">
             <Popover.Close asChild>
               <button
-                onClick={() => draft !== (item.note ?? "") && commit({ note: draft.trim() || null })}
+                onClick={() => draft !== (item.description ?? "") && commit({ description: draft.trim() || null })}
                 className="text-[0.7188rem] font-bold px-2.5 py-1 rounded-md border-0 cursor-pointer"
                 style={{ background: "var(--amber)", color: "#1a1206" }}
               >
@@ -582,8 +586,8 @@ const columns = [
     cell: (info) => <LinkCell item={info.row.original} ctx={info.table.options.meta as Ctx} />,
   }),
   col.display({
-    id: "note",
-    cell: (info) => <NoteCell item={info.row.original} ctx={info.table.options.meta as Ctx} />,
+    id: "description",
+    cell: (info) => <DescriptionCell item={info.row.original} ctx={info.table.options.meta as Ctx} />,
   }),
   col.display({
     id: "actions",
@@ -1061,7 +1065,7 @@ export function BoardView({
           <span>Due</span>
           <span>Progress</span>
           <span>Link</span>
-          <span>Note</span>
+          <span>Description</span>
           <span />
         </div>
 

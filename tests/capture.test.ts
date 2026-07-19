@@ -153,7 +153,7 @@ describe("ideas: trail, touch dedupe, promote", () => {
     expect(touched2.touchCount).toBe(2); // different session → bump
   });
 
-  it("promote: item gets description as note, idea sinks, second call idempotent", async () => {
+  it("promote: item gets idea's description as its own description, idea sinks, second call idempotent", async () => {
     const { idea } = await saveIdea(db, writer, {
       workspaceId: wsId,
       title: `cap-promote-${suffix}`,
@@ -163,7 +163,7 @@ describe("ideas: trail, touch dedupe, promote", () => {
     const p1 = await promoteIdea(db, writer, { ideaId: idea.id, boardId });
     expect(p1.alreadyPromoted).toBe(false);
     const item = await db.query.items.findFirst({ where: eq(items.id, p1.itemId) });
-    expect(item!.note).toBe("the description");
+    expect(item!.description).toBe("the description");
     expect(item!.status).toBe("da_fare"); // first non-terminal
     const sunk = await db.query.ideas.findFirst({ where: eq(ideas.id, idea.id) });
     expect(sunk!.sunkAt).not.toBeNull();

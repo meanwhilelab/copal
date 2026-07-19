@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { useLink, useObject, useRedact, useSearch, useUnlink, useUnsink } from "../api/hooks.js";
+import { useLink, useObject, useRedact, useSearch, useUnlink, useUnsink, useUpdateItem } from "../api/hooks.js";
 import { stripLabel, type ObjectDetail } from "../api/types.js";
+import { SinkGlyph } from "../views/Board.js";
 import { AttachmentsButton } from "./AttachmentsButton.js";
 import { Markdown } from "./Markdown.js";
 
@@ -18,6 +19,16 @@ const TypeBadge = ({ type }: { type: string }) => (
     style={{ color: TYPE_COLOR[type] ?? "var(--text-2)", background: `color-mix(in srgb, ${TYPE_COLOR[type] ?? "var(--text-2)"} 15%, transparent)` }}
   >
     {type}
+  </span>
+);
+
+const SunkChip = () => (
+  <span
+    title="sunk — included in the material"
+    className="flex-none w-4 h-4 rounded grid place-items-center border"
+    style={{ background: "var(--sunk-tint)", borderColor: "var(--line)" }}
+  >
+    <SinkGlyph size={9} />
   </span>
 );
 
@@ -55,9 +66,10 @@ function LinkPicker({ obj, onDone }: { obj: ObjectDetail; onDone: () => void }) 
                   },
                 )
               }
-              className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left cursor-pointer border-0 bg-transparent hover:bg-(--surface-hi)"
+              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left cursor-pointer border-0 bg-transparent hover:bg-(--surface-hi) ${r.sunk ? "sunk-row" : ""}`}
             >
               <TypeBadge type={r.type} />
+              {r.sunk && <SunkChip />}
               <span className="flex-1 min-w-0 text-[0.75rem] truncate" style={{ color: "var(--text-2)" }}>{r.title}</span>
             </button>
           ))}
@@ -66,6 +78,88 @@ function LinkPicker({ obj, onDone }: { obj: ObjectDetail; onDone: () => void }) 
         )}
       </div>
     </div>
+  );
+}
+
+/** Inline-editable item description — the lens the Librarian reads linked material through. */
+function ItemDescription({ d }: { d: ObjectDetail }) {
+  const update = useUpdateItem();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const meta = d.meta as Record<string, unknown>;
+  const commit = () => {
+    setEditing(false);
+    const next = draft.trim();
+    if (next === (d.body ? stripLabel(d.body) : "").trim()) return;
+    update.mutate(
+      { id: d.id, expected_version: meta.version as number, description: next || null },
+      { onError: (e) => toast.error(e instanceof Error ? e.message : "write failed") },
+    );
+  };
+  if (editing) {
+    return (
+      <div className="mb-5 flex flex-col gap-2">
+        <textarea
+          autoFocus
+          value={draft}
+          rows={6}
+          placeholder="Describe this item — the lens through which its linked material is read…"
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setEditing(false);
+          }}
+          className="text-[0.7813rem] rounded-md border px-2.5 py-2 outline-none resize-y"
+          style={{ background: "var(--ground)", borderColor: "var(--amber)", color: "var(--text)" }}
+        />
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={() => setEditing(false)}
+            className="text-[0.7188rem] px-2.5 py-1 rounded-md cursor-pointer bg-transparent border"
+            style={{ borderColor: "var(--line-2)", color: "var(--text-2)" }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={commit}
+            className="text-[0.7188rem] font-bold px-2.5 py-1 rounded-md border-0 cursor-pointer"
+            style={{ background: "var(--amber)", color: "#1a1206" }}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    );
+  }
+  const start = () => {
+    setDraft(d.body ? stripLabel(d.body) : "");
+    setEditing(true);
+  };
+  return d.body ? (
+    <div className="mb-5 group/desc">
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <Markdown>{stripLabel(d.body)}</Markdown>
+        </div>
+        <button
+          title="Edit description"
+          onClick={start}
+          className="flex-none w-6 h-6 grid place-items-center rounded-md border-0 bg-transparent cursor-pointer opacity-0 group-hover/desc:opacity-100 transition-opacity"
+          style={{ color: "var(--text-3)" }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  ) : (
+    <button
+      onClick={start}
+      className="mb-5 text-left text-[0.7813rem] cursor-pointer bg-transparent border-0 p-0"
+      style={{ color: "var(--text-3)" }}
+    >
+      + description
+    </button>
   );
 }
 
@@ -105,6 +199,28 @@ export function ObjectView({
           ? `${meta.closed ? "closed" : "open"}${meta.redacted ? " · redacted" : ""}`
           : `${meta.source_type ?? ""}${meta.redacted ? " · redacted" : ""}`;
 
+  const connectionRow = (c: ObjectDetail["connections"][number]) => (
+    <div
+      key={`${c.type}-${c.id}`}
+      className={`flex items-center gap-2 px-2.5 py-2 rounded-[9px] border ${c.sunk ? "sunk-row" : ""}`}
+      style={{ borderColor: "var(--line)", background: "var(--ground)" }}
+    >
+      <button onClick={() => onNavigate(c.type, c.id)} className="flex-1 min-w-0 flex items-center gap-2 text-left cursor-pointer bg-transparent border-0">
+        <TypeBadge type={c.type} />
+        {c.sunk && <SunkChip />}
+        <span className="flex-1 min-w-0 text-[0.7813rem] truncate" style={{ color: "var(--text-2)" }}>{c.title}</span>
+      </button>
+      <button
+        title="Disconnect"
+        onClick={() => unlink.mutate({ a_type: d.type, a_id: d.id, b_type: c.type, b_id: c.id }, { onError: (e) => toast.error(e.message) })}
+        className="w-6 h-6 grid place-items-center rounded-md border-0 bg-transparent cursor-pointer opacity-50 hover:opacity-100"
+        style={{ color: "var(--pri-alta)" }}
+      >
+        ✕
+      </button>
+    </div>
+  );
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex-none px-6 pt-5 pb-4 border-b" style={{ borderColor: "var(--line)" }}>
@@ -133,9 +249,35 @@ export function ObjectView({
       </div>
 
       <div className="flex-1 overflow-auto px-6 py-5">
-        {d.body ? (
+        {d.type === "item" ? (
+          <ItemDescription d={d} />
+        ) : d.body ? (
           <div className="mb-5">
             <Markdown>{stripLabel(d.body)}</Markdown>
+          </div>
+        ) : null}
+
+        {d.type === "item" && meta.context ? (
+          <div className="mb-6">
+            <div className="flex items-center gap-2 mb-2.5">
+              <h3 className="kicker m-0">Context</h3>
+              <span className="kicker" style={{ color: "var(--text-3)" }}>the Librarian's reading</span>
+              <div className="flex-1 h-px" style={{ background: "var(--line)" }} />
+            </div>
+            <div className="rounded-[9px] border border-dashed px-3 py-2.5" style={{ borderColor: "var(--line-2)", background: "var(--ground)" }}>
+              <Markdown>{stripLabel(meta.context as string)}</Markdown>
+              {meta.context_compiled_at ? (
+                <div className="mono text-[0.625rem] mt-2" style={{ color: "var(--text-3)" }}>
+                  compiled{" "}
+                  {new Date(meta.context_compiled_at as string).toLocaleString("en-GB", {
+                    day: "numeric",
+                    month: "short",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </div>
+              ) : null}
+            </div>
           </div>
         ) : null}
 
@@ -149,26 +291,24 @@ export function ObjectView({
         {picking && <LinkPicker obj={d} onDone={() => setPicking(false)} />}
 
         <div className="flex flex-col gap-1.5 mb-6">
-          {d.connections.map((c) => (
-            <div key={`${c.type}-${c.id}`} className="flex items-center gap-2 px-2.5 py-2 rounded-[9px] border" style={{ borderColor: "var(--line)", background: "var(--ground)" }}>
-              <button onClick={() => onNavigate(c.type, c.id)} className="flex-1 min-w-0 flex items-center gap-2 text-left cursor-pointer bg-transparent border-0">
-                <TypeBadge type={c.type} />
-                <span className="flex-1 min-w-0 text-[0.7813rem] truncate" style={{ color: "var(--text-2)" }}>{c.title}</span>
-              </button>
-              <button
-                title="Disconnect"
-                onClick={() => unlink.mutate({ a_type: d.type, a_id: d.id, b_type: c.type, b_id: c.id }, { onError: (e) => toast.error(e.message) })}
-                className="w-6 h-6 grid place-items-center rounded-md border-0 bg-transparent cursor-pointer opacity-50 hover:opacity-100"
-                style={{ color: "var(--pri-alta)" }}
-              >
-                ✕
-              </button>
-            </div>
-          ))}
+          {d.connections.filter((c) => !c.sunk).map(connectionRow)}
           {d.connections.length === 0 && !picking && (
             <div className="text-[0.7188rem] py-1" style={{ color: "var(--text-3)" }}>Nothing connected yet — use ＋ link.</div>
           )}
         </div>
+
+        {d.connections.some((c) => c.sunk) && (
+          <>
+            <div className="flex items-center gap-2 mb-2.5">
+              <h3 className="kicker m-0">Connections</h3>
+              <span className="kicker" style={{ color: "var(--text-3)" }}>to sunk objects</span>
+              <div className="flex-1 h-px" style={{ background: "var(--line)" }} />
+            </div>
+            <div className="flex flex-col gap-1.5 mb-6">
+              {d.connections.filter((c) => c.sunk).map(connectionRow)}
+            </div>
+          </>
+        )}
 
         {d.resonances.length > 0 && (
           <>

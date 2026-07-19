@@ -5,6 +5,7 @@ import { recordEvent } from "./audit.js";
 import type { AuthedClient } from "./auth.js";
 import { sessionTitleSql } from "./display.js";
 import { NotFoundError } from "./errors.js";
+import { enqueueItemContext } from "./jobs.js";
 import { labelDerived } from "./provenance.js";
 import { sinkEntity } from "./links.js";
 
@@ -46,7 +47,9 @@ export async function listProposals(db: Db) {
       SELECT p.id, p.kind, p.from_type, p.from_id, p.to_type, p.to_id, p.score,
              p.rationale, p.suggested_link_type, p.created_at,
              coalesce(ai.title, ait.name, ac.title, ${sql.raw(sessionTitleSql("asess"))}) AS from_title,
-             coalesce(bi.title, bit.name, bc.title, ${sql.raw(sessionTitleSql("bsess"))}) AS to_title
+             coalesce(bi.title, bit.name, bc.title, ${sql.raw(sessionTitleSql("bsess"))}) AS to_title,
+             coalesce(ai.sunk_at, ait.sunk_at, ac.sunk_at) IS NOT NULL AS from_sunk,
+             coalesce(bi.sunk_at, bit.sunk_at, bc.sunk_at) IS NOT NULL AS to_sunk
       FROM proposals p
       LEFT JOIN ideas ai     ON p.from_type='idea'    AND ai.id=p.from_id
       LEFT JOIN items ait    ON p.from_type='item'    AND ait.id=p.from_id
@@ -80,24 +83,30 @@ export async function acceptProposal(db: Db, id: string, client: AuthedClient) {
 
   await db.transaction(async (tx) => {
     if (p.kind === "link" && p.toType && p.toId) {
-      await tx
+      const linkType = p.suggestedLinkType ?? "connected";
+      const ins = await tx
         .insert(links)
         .values({
           fromType: p.fromType,
           fromId: p.fromId,
           toType: p.toType,
           toId: p.toId,
-          linkType: p.suggestedLinkType ?? "connected",
+          linkType,
           createdByClientId: client.id,
         })
-        .onConflictDoNothing();
+        .onConflictDoNothing()
+        .returning();
+      if (ins.length > 0) {
+        if (p.fromType === "item") await enqueueItemContext(tx as unknown as Db, p.fromId);
+        if (p.toType === "item") await enqueueItemContext(tx as unknown as Db, p.toId);
+      }
       await recordEvent(tx as unknown as Db, client, {
         action: "link",
         entityType: "link",
         detail: {
           from: { type: p.fromType, id: p.fromId },
           to: { type: p.toType, id: p.toId },
-          linkType: p.suggestedLinkType ?? "connected",
+          linkType,
           proposalId: id,
         },
       });

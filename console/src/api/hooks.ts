@@ -80,6 +80,7 @@ export function useInvalidate() {
   const qc = useQueryClient();
   return {
     board: () => void qc.invalidateQueries({ queryKey: ["board"] }),
+    object: () => void qc.invalidateQueries({ queryKey: ["object"] }),
     ideas: () => {
       void qc.invalidateQueries({ queryKey: ["ideas"] });
       void qc.invalidateQueries({ queryKey: ["idea"] });
@@ -249,7 +250,10 @@ export const useUpdateItem = () => {
   return useMutation({
     mutationFn: ({ id, ...body }: { id: string; expected_version: number } & Record<string, unknown>) =>
       api<Item>(`/items/${id}`, { method: "PATCH", body }),
-    onSettled: () => inv.board(),
+    onSettled: () => {
+      inv.board();
+      inv.object();
+    },
   });
 };
 

@@ -27,7 +27,7 @@ async function vectorSearch(
   const result = await db.execute(sql`
     SELECT e.entity_type AS type, e.entity_id AS id,
       coalesce(i.title, it.name, c.title, ${sql.raw(sessionTitleSql("s"))}) AS title,
-      left(coalesce(i.description, it.note, c.catalogue->>'summary', s.summary, ''), 2000) AS snippet,
+      left(coalesce(i.description, it.description, c.catalogue->>'summary', s.summary, ''), 2000) AS snippet,
       (1 - (e.embedding <=> ${qv}))::float4 AS rank,
       coalesce(i.sunk_at, it.sunk_at, c.sunk_at) IS NOT NULL AS sunk
     FROM embeddings e
@@ -95,7 +95,7 @@ export async function search(
         AND (${ws}::uuid IS NULL OR workspace_id = ${ws}::uuid)`);
   if (types.includes("item"))
     parts.push(sql`
-      SELECT 'item' AS type, it.id, it.name AS title, ts_headline('simple', coalesce(it.note, it.name), ${tsq}) AS snippet,
+      SELECT 'item' AS type, it.id, it.name AS title, ts_headline('simple', coalesce(it.description, it.name), ${tsq}) AS snippet,
              ts_rank(it.search, ${tsq}) AS rank, (it.sunk_at IS NOT NULL) AS sunk
       FROM items it JOIN boards b ON b.id = it.board_id
       WHERE (it.search @@ ${tsq} OR it.name ILIKE ${like})

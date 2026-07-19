@@ -41,16 +41,27 @@ async function loadNative(db: Db, type: ObjectType, id: string) {
   if (type === "item") {
     const r = await one(
       db,
-      sql`SELECT i.name, i.note, i.status, i.lane, i.priority, i.progress, i.due_date, i.sunk_at, i.board_id, b.name AS board
+      sql`SELECT i.name, i.description, i.context, i.context_compiled_at, i.status, i.lane, i.priority, i.progress, i.due_date, i.sunk_at, i.board_id, i.version, b.name AS board
           FROM items i JOIN boards b ON b.id=i.board_id WHERE i.id=${id}::uuid`,
     );
     if (!r) throw new NotFoundError(`item ${id}`);
     return {
       title: r.name as string,
-      body: (r.note as string) ?? null,
+      body: (r.description as string) ?? null,
       sunk: r.sunk_at !== null,
       redactable: false,
-      meta: { status: r.status, lane: r.lane, priority: r.priority, progress: r.progress, due_date: r.due_date, board: r.board, board_id: r.board_id },
+      meta: {
+        status: r.status,
+        lane: r.lane,
+        priority: r.priority,
+        progress: r.progress,
+        due_date: r.due_date,
+        board: r.board,
+        board_id: r.board_id,
+        context: r.context ? labelDerived(r.context as string, "machine-summary") : null,
+        context_compiled_at: r.context_compiled_at,
+        version: r.version,
+      },
     };
   }
   if (type === "session") {
@@ -102,7 +113,8 @@ async function loadConnections(db: Db, type: ObjectType, id: string) {
     db,
     sql`
     SELECT e.other_type AS type, e.other_id AS id, e.link_type,
-           coalesce(i.title, it.name, c.title, ${sql.raw(sessionTitleSql("s"))}) AS title
+           coalesce(i.title, it.name, c.title, ${sql.raw(sessionTitleSql("s"))}) AS title,
+           coalesce(i.sunk_at, it.sunk_at, c.sunk_at) IS NOT NULL AS sunk
     FROM (
       SELECT l.to_type AS other_type, l.to_id AS other_id, l.link_type
         FROM links l WHERE l.from_type=${type} AND l.from_id=${id}::uuid AND l.link_type NOT IN ('touches', 'attachment')

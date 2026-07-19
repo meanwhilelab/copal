@@ -10,18 +10,37 @@ const TYPE_COLOR: Record<string, string> = {
   content: "var(--honey)",
 };
 
-function Card({ type, title, snippet, onClick }: { type: string; title: string; snippet?: string; onClick: () => void }) {
+function Card({
+  type,
+  title,
+  snippet,
+  sunk,
+  onClick,
+}: {
+  type: string;
+  title: string;
+  snippet?: string;
+  sunk?: boolean;
+  onClick: () => void;
+}) {
   const c = TYPE_COLOR[type] ?? "var(--text-2)";
   return (
     <button
       onClick={onClick}
-      className="text-left rounded-xl border p-3.5 cursor-pointer risein hover:border-(--line-2)"
+      className={`text-left rounded-xl border p-3.5 cursor-pointer risein hover:border-(--line-2) ${sunk ? "sunk-row" : ""}`}
       style={{ background: "var(--surface)", borderColor: "var(--line)" }}
     >
       <span className="mono text-[0.5938rem] uppercase tracking-wider px-1.5 py-0.5 rounded-md" style={{ color: c, background: `color-mix(in srgb, ${c} 15%, transparent)` }}>
         {type}
       </span>
-      <div className="display text-[0.9375rem] font-medium leading-tight mt-2 mb-1">{title}</div>
+      <div className="display text-[0.9375rem] font-medium leading-tight mt-2 mb-1">
+        {title}
+        {sunk && (
+          <span className="mono text-[0.5625rem] ml-2" style={{ color: "var(--amber)" }}>
+            ↓ included
+          </span>
+        )}
+      </div>
       {snippet ? (
         <div className="text-xs leading-relaxed line-clamp-2" style={{ color: "var(--text-3)" }}>
           {snippet}
@@ -65,7 +84,7 @@ export function ExploreView() {
         searchCards.length > 0 ? (
           <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))" }}>
             {searchCards.map((r) => (
-              <Card key={`${r.type}-${r.id}`} type={r.type} title={r.title} snippet={stripLabel(r.snippet).replace(/<\/?b>/g, "")} onClick={() => open(r.type, r.id)} />
+              <Card key={`${r.type}-${r.id}`} type={r.type} title={r.title} snippet={stripLabel(r.snippet).replace(/<\/?b>/g, "")} sunk={r.sunk} onClick={() => open(r.type, r.id)} />
             ))}
           </div>
         ) : (
@@ -81,6 +100,7 @@ export function ExploreView() {
                 type={c.type}
                 title={c.title}
                 snippet={c.human_text ?? stripLabel(c.machine_text)}
+                sunk={c.sunk}
                 onClick={() => open(c.type, c.id)}
               />
             ))}

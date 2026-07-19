@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db, pool } from "../src/db/client.js";
-import { apiClients, contents, jobs, llmUsage, sessions, workspaces } from "../src/db/schema.js";
+import { apiClients, boards, contents, items, jobs, links, llmUsage, sessions, workspaces } from "../src/db/schema.js";
 import { generateToken, hashToken, type AuthedClient } from "../src/core/auth.js";
 import { getContext } from "../src/core/context.js";
 import { saveContent } from "../src/core/contents.js";
@@ -42,6 +42,8 @@ afterAll(async () => {
   await db.execute(sql`DELETE FROM sessions WHERE client_id = ${writer.id}::uuid`);
   await db.execute(sql`DELETE FROM ideas WHERE created_by_client_id = ${writer.id}::uuid`);
   await db.execute(sql`DELETE FROM contents WHERE created_by_client_id = ${writer.id}::uuid`);
+  await db.execute(sql`DELETE FROM items WHERE board_id IN (SELECT id FROM boards WHERE name = ${`hk-board-${suffix}`})`);
+  await db.execute(sql`DELETE FROM boards WHERE name = ${`hk-board-${suffix}`}`);
   await db.delete(apiClients).where(eq(apiClients.id, writer.id));
   await pool.end();
 });
@@ -200,5 +202,75 @@ describe("integration: summary reaches get_context", () => {
     const ctx = await getContext(db, { type: "board", id: boardId }, 2000);
     const flat = JSON.stringify(ctx.recent_sessions);
     expect(flat).toContain("machine-summary");
+  });
+});
+
+describe("item_context", () => {
+  let boardId: string;
+  beforeAll(async () => {
+    const [b] = await db.insert(boards).values({ workspaceId: wsId, name: `hk-board-${suffix}` }).returning();
+    boardId = b!.id;
+  });
+
+  it("compiles a chronologically-aware synthesis of linked material, guided by the description", async () => {
+    const [item] = await db
+      .insert(items)
+      .values({ boardId, name: `hk-item-${suffix}`, status: "todo", description: "Ship the payments migration" })
+      .returning();
+    const { idea } = await saveIdea(db, writer, {
+      workspaceId: wsId,
+      title: `hk-ctx-idea-${suffix}`,
+      description: "Stripe webhook retries need idempotency keys.",
+      csid: `hk-item-ctx-${suffix}`,
+    });
+    await db.insert(links).values({
+      fromType: "item",
+      fromId: item!.id,
+      toType: "idea",
+      toId: idea.id,
+      linkType: "connected",
+      createdByClientId: writer.id,
+    });
+    await db.execute(sql`INSERT INTO jobs (kind, subject_id, payload) VALUES
+      ('item_context', ${item!.id}::uuid, ${JSON.stringify({ item_id: item!.id })}::jsonb)`);
+
+    let sawDescription = false;
+    let sawLinkedText = false;
+    const provider = fakeProvider((input) => {
+      if (input.user.includes("Ship the payments migration")) sawDescription = true;
+      if (input.user.includes("idempotency keys")) sawLinkedText = true;
+      expect(input.system).toContain("UNTRUSTED");
+      return "The item ships a payments migration; the linked idea flags webhook idempotency as a risk.";
+    });
+    await housekeeperTick(db, provider);
+    expect(sawDescription).toBe(true); // description is the lens the prompt is built around
+    expect(sawLinkedText).toBe(true); // the linked idea's own text made it into the material
+
+    const fresh = await db.query.items.findFirst({ where: eq(items.id, item!.id) });
+    expect(fresh!.context).toContain("payments migration");
+    expect(fresh!.contextCompiledAt).not.toBeNull();
+  });
+
+  it("clears a stale context to null when the item has no declared connections, without calling the model", async () => {
+    const [item] = await db
+      .insert(items)
+      .values({
+        boardId,
+        name: `hk-item-nolinks-${suffix}`,
+        status: "todo",
+        context: "stale context from before its only link was removed",
+        contextCompiledAt: new Date(),
+      })
+      .returning();
+    await db.execute(sql`INSERT INTO jobs (kind, subject_id, payload) VALUES
+      ('item_context', ${item!.id}::uuid, ${JSON.stringify({ item_id: item!.id })}::jsonb)`);
+
+    const provider = fakeProvider(() => {
+      throw new Error("provider should not be called — nothing is linked");
+    });
+    await housekeeperTick(db, provider);
+
+    const fresh = await db.query.items.findFirst({ where: eq(items.id, item!.id) });
+    expect(fresh!.context).toBeNull();
   });
 });
