@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import rateLimit from "@fastify/rate-limit";
@@ -71,6 +72,66 @@ function bearerFrom(req: FastifyRequest): string | undefined {
 // Matches both the legacy `amb_` and the current `cop_` token prefixes.
 const redactTokenInUrl = (url: string) => url.replace(/(\/mcp\/)(amb|cop)_[A-Za-z0-9_-]+/g, "$1$2_***");
 
+// ---- OG-tag injection for /s/:token (unfurl crawlers don't run JS, so the
+// static SPA shell needs server-rendered meta before the SPA takes over) ----
+
+const OG_FALLBACK_DESCRIPTION =
+  "A shared read-only item — description, status, and the Librarian's context.";
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Mirrors console/src/api/types.ts stripLabel — the backend has no dependency
+// on the console bundle, and item.description isn't normally provenance-
+// labelled anyway, but this stays defensive/idempotent if it ever is.
+function stripDataLabel(text: string): string {
+  return text
+    .replace(/^\[data source=[^\]]*\]\n?/, "")
+    .replace(/\n?\[end data\]$/, "")
+    .trim();
+}
+
+// Rough markdown → plain text: not a full parser, just enough to keep an OG
+// description readable (no stray `**`/`#`/backticks, links collapse to text).
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\*\*/g, "")
+    .replace(/`/g, "")
+    .replace(/^#+\s*/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function truncate(text: string, max = 200): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trimEnd()}…`;
+}
+
+function buildOgDescription(description: string | null | undefined): string {
+  if (!description) return OG_FALLBACK_DESCRIPTION;
+  const plain = stripMarkdown(stripDataLabel(description));
+  return plain ? truncate(plain, 200) : OG_FALLBACK_DESCRIPTION;
+}
+
+function buildOgMetaBlock(opts: { title: string; description: string; url: string; image: string }): string {
+  return [
+    `<meta property="og:site_name" content="Copal" />`,
+    `<meta property="og:type" content="article" />`,
+    `<meta property="og:title" content="${escapeHtml(opts.title)}" />`,
+    `<meta property="og:description" content="${escapeHtml(opts.description)}" />`,
+    `<meta property="og:url" content="${escapeHtml(opts.url)}" />`,
+    `<meta property="og:image" content="${escapeHtml(opts.image)}" />`,
+    `<meta name="twitter:card" content="summary_large_image" />`,
+  ].join("\n    ");
+}
+
 export async function buildApp(db: Db) {
   const app = Fastify({
     // Behind Caddy: trust the proxy so req.ip is the real client, not the proxy.
@@ -94,13 +155,48 @@ export async function buildApp(db: Db) {
     timeWindow: config.rateLimit.windowMs,
     // Key per credential (token), falling back to real client IP for anonymous
     // requests. Runs at onRequest, before auth resolves req.apiClient, so we read
-    // the token straight off the request. The public share endpoint carries no
-    // credential — its :token path param is share-specific, not a client bearer —
-    // so key it by IP; otherwise many share links from one visitor would each get
-    // their own budget instead of sharing one.
-    keyGenerator: (req) => (req.url.startsWith("/api/public/") ? req.ip : bearerFrom(req) ?? req.ip),
+    // the token straight off the request. The public share endpoints carry no
+    // credential — their :token path param is share-specific, not a client bearer —
+    // so key those by IP; otherwise many share links from one visitor would each
+    // get their own budget instead of sharing one. /s/:token (the unfurl page)
+    // has the same shape (a `:token` param) and the same reasoning.
+    keyGenerator: (req) =>
+      req.url.startsWith("/api/public/") || req.url.startsWith("/s/") ? req.ip : bearerFrom(req) ?? req.ip,
     allowList: (req) => req.url === "/healthz" || req.url === "/status",
   });
+
+  // Search engines must never index this app (it's a personal corpus behind a
+  // token wall); unfurl bots for messaging apps generally ignore this meta tag,
+  // so previews below keep working. Global, not just the SPA — belt and braces.
+  app.addHook("onSend", async (_req, reply, payload) => {
+    reply.header("X-Robots-Tag", "noindex, nofollow");
+    return payload;
+  });
+
+  // Deliberately NOT a Disallow — a robots.txt block would stop crawlers from
+  // ever seeing the noindex header/meta above, and Google can still index a
+  // bare URL discovered from a link even without crawling it.
+  app.get("/robots.txt", async (_req, reply) => {
+    reply.header("content-type", "text/plain");
+    return [
+      "User-agent: *",
+      "Disallow:",
+      "# indexing is refused via noindex; crawling is allowed so robots can see it",
+    ].join("\n");
+  });
+
+  // Same static root the SPA fallback serves from (see the "console static"
+  // section below) — read once, lazily, and cached for the life of this app
+  // instance. Declared here because /s/:token (below) needs it too.
+  const consoleDist = new URL("../../console/dist", import.meta.url).pathname;
+  let cachedIndexHtml: string | null | undefined; // undefined = not yet read; null = missing
+
+  const readIndexHtmlOnce = (): string | null => {
+    if (cachedIndexHtml !== undefined) return cachedIndexHtml;
+    const indexPath = join(consoleDist, "index.html");
+    cachedIndexHtml = existsSync(indexPath) ? readFileSync(indexPath, "utf8") : null;
+    return cachedIndexHtml;
+  };
 
   // Known, client-safe errors → clean status codes; everything else → generic
   // 500 with detail logged server-side (never leak driver/internal messages).
@@ -147,6 +243,36 @@ export async function buildApp(db: Db) {
     const item = await getPublicItemByToken(db, token);
     if (!item) return reply.code(404).send({ error: "not found" });
     return item;
+  });
+
+  // Server-rendered OG tags for `/s/<token>` — messaging-app unfurl bots don't
+  // run JS, so the plain SPA shell would preview generically. Registered ahead
+  // of the SPA fallback (below) so it wins the route match. Resolved and
+  // unresolved (unknown/revoked) tokens get the same shape of block; the
+  // unresolved case never leaks anything beyond what the page itself shows.
+  app.get("/s/:token", async (req, reply) => {
+    const html = readIndexHtmlOnce();
+    if (html === null) return reply.callNotFound(); // no built console (e.g. some test envs)
+
+    const { token } = req.params as { token: string };
+    // req.host (not req.hostname, which strips the port) is the full authority —
+    // matters in dev where the app runs on a non-standard port; in prod behind
+    // Caddy there's no port on the Host header anyway. trustProxy honours
+    // X-Forwarded-Proto/Host if Caddy ever sits in front on a non-default port.
+    const base = `${req.protocol}://${req.host}`;
+    const shareUrl = `${base}/s/${token}`;
+    const image = `${base}/copal-social-card.png`;
+
+    const item = await getPublicItemByToken(db, token);
+    const meta = buildOgMetaBlock(
+      item
+        ? { title: `${item.name} — Copal`, description: buildOgDescription(item.description), url: shareUrl, image }
+        : { title: "Copal", description: OG_FALLBACK_DESCRIPTION, url: shareUrl, image },
+    );
+
+    return reply
+      .header("content-type", "text/html; charset=utf-8")
+      .send(html.replace("</head>", `${meta}\n  </head>`));
   });
 
   // Authentication for the data surfaces only; the SPA shell (unlock screen +
@@ -574,8 +700,8 @@ export async function buildApp(db: Db) {
   });
 
   // ---- console static (SPA) ------------------------------------------------------
-  // Registered last; /api and /mcp routes take precedence. Directory absent in dev.
-  const consoleDist = new URL("../../console/dist", import.meta.url).pathname;
+  // Registered last; /api, /mcp and /s/:token routes take precedence. Directory
+  // absent in dev. consoleDist is declared up near /s/:token, which shares it.
   if (existsSync(consoleDist)) {
     const { default: fastifyStatic } = await import("@fastify/static");
     await app.register(fastifyStatic, { root: consoleDist, wildcard: false });

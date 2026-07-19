@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db, pool } from "../src/db/client.js";
@@ -16,6 +18,16 @@ let wsId: string;
 let boardId: string;
 let app: Awaited<ReturnType<typeof buildApp>>;
 let baseUrl: string;
+
+// buildApp reads console/dist/index.html for the /s/:token unfurl route (see
+// src/rest/server.ts). A dev checkout that hasn't run `npm run console:build`
+// yet won't have it — write a minimal fixture so the share-unfurl tests below
+// are deterministic either way; leave a real build untouched, and clean up
+// only what we created.
+const consoleDist = new URL("../console/dist", import.meta.url).pathname;
+const indexHtmlPath = join(consoleDist, "index.html");
+let createdConsoleDistDir = false;
+let createdIndexHtmlFixture = false;
 
 const H = { authorization: `Bearer ${writerToken}`, "content-type": "application/json" };
 
@@ -43,6 +55,19 @@ beforeAll(async () => {
     })
     .returning();
   boardId = b!.id;
+
+  if (!existsSync(indexHtmlPath)) {
+    if (!existsSync(consoleDist)) {
+      mkdirSync(consoleDist, { recursive: true });
+      createdConsoleDistDir = true;
+    }
+    writeFileSync(
+      indexHtmlPath,
+      '<!doctype html><html><head><meta charset="UTF-8" /><title>Copal</title></head><body><div id="root"></div></body></html>',
+    );
+    createdIndexHtmlFixture = true;
+  }
+
   app = await buildApp(db);
   await app.listen({ port: 0, host: "127.0.0.1" });
   const addr = app.server.address();
@@ -51,6 +76,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app.close();
+  if (createdIndexHtmlFixture) rmSync(indexHtmlPath, { force: true });
+  if (createdConsoleDistDir) rmSync(consoleDist, { recursive: true, force: true });
   await db.execute(sql`DELETE FROM proposals WHERE from_id IN (SELECT id FROM ideas WHERE created_by_client_id = ${writer.id}::uuid) OR to_id IN (SELECT id FROM ideas WHERE created_by_client_id = ${writer.id}::uuid)`);
   await db.execute(sql`DELETE FROM links WHERE created_by_client_id = ${writer.id}::uuid OR from_id IN (SELECT id FROM sessions WHERE client_id=${writer.id}::uuid)`);
   await db.execute(sql`DELETE FROM jobs WHERE subject_id IN (SELECT id FROM sessions WHERE client_id=${writer.id}::uuid)`);
@@ -516,5 +543,76 @@ describe("item share links", () => {
 
     const status = await fetch(`${baseUrl}/api/v1/items/${shareItemId}/share`, { headers: H });
     expect((await status.json()) as { active: boolean }).toEqual({ active: false });
+  });
+});
+
+describe("share-link unfurl (/s/:token) + noindex posture", () => {
+  const authOnly = { authorization: H.authorization };
+  let unfurlItemId: string;
+  let unfurlToken: string;
+  // Ampersand + quote in the name exercise HTML-escaping of the injected og:title.
+  const itemName = `Ship & "Sail" ${suffix}`;
+
+  it("active share: GET /s/<token> is 200 HTML with an escaped, item-specific og:title", async () => {
+    const [item] = await db
+      .insert(items)
+      .values({ boardId, name: itemName, status: "open", description: "**bold** plan for the launch" })
+      .returning();
+    unfurlItemId = item!.id;
+
+    const created = await fetch(`${baseUrl}/api/v1/items/${unfurlItemId}/share`, { method: "POST", headers: authOnly });
+    const body = (await created.json()) as { token: string };
+    unfurlToken = body.token;
+
+    const res = await fetch(`${baseUrl}/s/${unfurlToken}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const html = await res.text();
+
+    const escapedName = "Ship &amp; &quot;Sail&quot; " + suffix;
+    expect(html).toContain(`<meta property="og:title" content="${escapedName} — Copal" />`);
+    expect(html).not.toContain(`content="${itemName}`); // the raw, unescaped name never appears
+    expect(html).toContain(`<meta property="og:site_name" content="Copal" />`);
+    expect(html).toContain(`<meta property="og:type" content="article" />`);
+    expect(html).toContain(`<meta property="og:description" content="bold plan for the launch" />`);
+    expect(html).toContain(`<meta property="og:url" content="${baseUrl}/s/${unfurlToken}" />`);
+    expect(html).toContain(`<meta property="og:image" content="${baseUrl}/copal-social-card.png" />`);
+    expect(html).toContain(`<meta name="twitter:card" content="summary_large_image" />`);
+    // the SPA shell still boots normally from this HTML
+    expect(html).toContain('<div id="root"></div>');
+  });
+
+  it("revoked/unknown token: 200 HTML with the generic Copal block, no item-name leakage", async () => {
+    await fetch(`${baseUrl}/api/v1/items/${unfurlItemId}/share`, { method: "DELETE", headers: authOnly });
+
+    const res = await fetch(`${baseUrl}/s/${unfurlToken}`);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain(`<meta property="og:title" content="Copal" />`);
+    expect(html).toContain(
+      `<meta property="og:description" content="A shared read-only item — description, status, and the Librarian&#39;s context." />`,
+    );
+    expect(html).not.toContain(itemName);
+
+    const unknown = await fetch(`${baseUrl}/s/cops_${"a".repeat(43)}`);
+    expect(unknown.status).toBe(200);
+    expect(await unknown.text()).toContain(`<meta property="og:title" content="Copal" />`);
+  });
+
+  it("X-Robots-Tag: noindex, nofollow is set on API responses and the share page", async () => {
+    const api = await fetch(`${baseUrl}/api/v1/vitals`, { headers: H });
+    expect(api.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+
+    const share = await fetch(`${baseUrl}/s/cops_${"b".repeat(43)}`);
+    expect(share.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+  });
+
+  it("GET /robots.txt allows crawling (no Disallow) so bots can see the noindex signal", async () => {
+    const res = await fetch(`${baseUrl}/robots.txt`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/plain");
+    const body = await res.text();
+    expect(body).toContain("User-agent: *");
+    expect(body).not.toMatch(/Disallow:\s*\/\S/); // "Disallow:" with no path = allow-all
   });
 });

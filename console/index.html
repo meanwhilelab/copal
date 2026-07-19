@@ -9,6 +9,9 @@
     <link rel="manifest" href="/site.webmanifest" />
     <meta name="theme-color" content="#3F4043" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Belt-and-braces: X-Robots-Tag header (server) is the real gate; this
+         covers any path that ever serves this shell without the header. -->
+    <meta name="robots" content="noindex, nofollow" />
     <title>Copal</title>
       <script>
       // One-time key migration (the app was renamed Amber → Copal) so existing
