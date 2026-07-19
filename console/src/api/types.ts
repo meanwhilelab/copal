@@ -19,7 +19,7 @@ export type Item = {
   status: string;
   progress: number;
   dueDate: string | null;
-  note: string | null;
+  description: string | null;
   link: string | null;
   version: number;
   sunkAt: string | null;

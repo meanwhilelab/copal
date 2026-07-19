@@ -3,8 +3,23 @@ import type { Db } from "../db/client.js";
 import { boards, contents, ideas, items, links } from "../db/schema.js";
 import { recordEvent, type AuditEntityType } from "./audit.js";
 import type { AuthedClient } from "./auth.js";
+import { enqueueItemContext } from "./jobs.js";
 
 export type EntityType = "board" | "item" | "idea" | "session" | "content";
+
+// Link types that never carry item-material worth re-synthesizing: the
+// touches trail (idea capture) and content↔item attachments.
+const CONTEXT_EXEMPT_LINK_TYPES = new Set(["touches", "attachment"]);
+
+/** Item endpoints of a declared (non-exempt) link — the ones whose compiled
+ *  context needs to be recompiled when the link set changes. */
+function itemEndpoints(edge: { fromType: string; fromId: string; toType: string; toId: string; linkType: string }): string[] {
+  if (CONTEXT_EXEMPT_LINK_TYPES.has(edge.linkType)) return [];
+  const ids: string[] = [];
+  if (edge.fromType === "item") ids.push(edge.fromId);
+  if (edge.toType === "item") ids.push(edge.toId);
+  return ids;
+}
 
 /** Remove any user-declared connection between two objects (either direction). */
 export async function removeLink(
@@ -14,11 +29,20 @@ export async function removeLink(
   actor?: AuthedClient | null,
 ) {
   return db.transaction(async (tx) => {
-    await tx.execute(sql`
-      DELETE FROM links WHERE link_type <> 'touches' AND (
-        (from_type=${a.type} AND from_id=${a.id}::uuid AND to_type=${b.type} AND to_id=${b.id}::uuid)
-        OR (from_type=${b.type} AND from_id=${b.id}::uuid AND to_type=${a.type} AND to_id=${a.id}::uuid)
-      )`);
+    const removed = (
+      await tx.execute(sql`
+        DELETE FROM links WHERE link_type <> 'touches' AND (
+          (from_type=${a.type} AND from_id=${a.id}::uuid AND to_type=${b.type} AND to_id=${b.id}::uuid)
+          OR (from_type=${b.type} AND from_id=${b.id}::uuid AND to_type=${a.type} AND to_id=${a.id}::uuid)
+        )
+        RETURNING from_type, from_id, to_type, to_id, link_type`)
+    ).rows as { from_type: string; from_id: string; to_type: string; to_id: string; link_type: string }[];
+    const affectedItemIds = new Set(
+      removed.flatMap((r) =>
+        itemEndpoints({ fromType: r.from_type, fromId: r.from_id, toType: r.to_type, toId: r.to_id, linkType: r.link_type }),
+      ),
+    );
+    for (const itemId of affectedItemIds) await enqueueItemContext(tx as unknown as Db, itemId);
     await recordEvent(tx as unknown as Db, actor ?? null, {
       action: "unlink",
       entityType: "link",
@@ -49,6 +73,7 @@ export async function linkItems(
     const inserted = await db.transaction(async (tx) => {
       const ins = await tx.insert(links).values(input).onConflictDoNothing().returning();
       if (ins.length > 0) {
+        for (const itemId of itemEndpoints(input)) await enqueueItemContext(tx as unknown as Db, itemId);
         await recordEvent(tx as unknown as Db, actor ?? null, {
           action: "link",
           entityType: "link",

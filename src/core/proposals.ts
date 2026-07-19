@@ -5,6 +5,7 @@ import { recordEvent } from "./audit.js";
 import type { AuthedClient } from "./auth.js";
 import { sessionTitleSql } from "./display.js";
 import { NotFoundError } from "./errors.js";
+import { enqueueItemContext } from "./jobs.js";
 import { labelDerived } from "./provenance.js";
 import { sinkEntity } from "./links.js";
 
@@ -82,24 +83,30 @@ export async function acceptProposal(db: Db, id: string, client: AuthedClient) {
 
   await db.transaction(async (tx) => {
     if (p.kind === "link" && p.toType && p.toId) {
-      await tx
+      const linkType = p.suggestedLinkType ?? "connected";
+      const ins = await tx
         .insert(links)
         .values({
           fromType: p.fromType,
           fromId: p.fromId,
           toType: p.toType,
           toId: p.toId,
-          linkType: p.suggestedLinkType ?? "connected",
+          linkType,
           createdByClientId: client.id,
         })
-        .onConflictDoNothing();
+        .onConflictDoNothing()
+        .returning();
+      if (ins.length > 0) {
+        if (p.fromType === "item") await enqueueItemContext(tx as unknown as Db, p.fromId);
+        if (p.toType === "item") await enqueueItemContext(tx as unknown as Db, p.toId);
+      }
       await recordEvent(tx as unknown as Db, client, {
         action: "link",
         entityType: "link",
         detail: {
           from: { type: p.fromType, id: p.fromId },
           to: { type: p.toType, id: p.toId },
-          linkType: p.suggestedLinkType ?? "connected",
+          linkType,
           proposalId: id,
         },
       });

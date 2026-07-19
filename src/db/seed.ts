@@ -41,7 +41,7 @@ if (existing) {
   const firstStatus = DEFAULT_STATUS_SET.find((s) => !s.terminal)?.key ?? DEFAULT_STATUS_SET[0]!.key;
   await db.insert(items).values([
     { boardId: board.id, name: "Drag me to another column to change my status", status: firstStatus, priority: "media" },
-    { boardId: board.id, name: "Click any cell to edit — priority, due date, progress, a link, or a note", status: firstStatus, priority: "bassa" },
+    { boardId: board.id, name: "Click any cell to edit — priority, due date, progress, a link, or a description", status: firstStatus, priority: "bassa" },
   ]);
   console.log("seeded: 'personal' workspace + 'Getting started' board (2 example items)");
 }

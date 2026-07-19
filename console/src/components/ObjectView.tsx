@@ -173,6 +173,30 @@ export function ObjectView({
           </div>
         ) : null}
 
+        {d.type === "item" && meta.context ? (
+          <div className="mb-6">
+            <div className="flex items-center gap-2 mb-2.5">
+              <h3 className="kicker m-0">Context</h3>
+              <span className="kicker" style={{ color: "var(--text-3)" }}>the Librarian's reading</span>
+              <div className="flex-1 h-px" style={{ background: "var(--line)" }} />
+            </div>
+            <div className="rounded-[9px] border border-dashed px-3 py-2.5" style={{ borderColor: "var(--line-2)", background: "var(--ground)" }}>
+              <Markdown>{stripLabel(meta.context as string)}</Markdown>
+              {meta.context_compiled_at ? (
+                <div className="mono text-[0.625rem] mt-2" style={{ color: "var(--text-3)" }}>
+                  compiled{" "}
+                  {new Date(meta.context_compiled_at as string).toLocaleString("en-GB", {
+                    day: "numeric",
+                    month: "short",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
         <div className="flex items-center gap-2 mb-2.5">
           <h3 className="kicker m-0">Connections</h3>
           <div className="flex-1 h-px" style={{ background: "var(--line)" }} />

@@ -74,7 +74,9 @@ export const items = pgTable("items", {
   status: text("status").notNull(),
   progress: integer("progress").notNull().default(0),
   dueDate: date("due_date"),
-  note: text("note"),
+  description: text("description"), // human-authored — the owner's framing, and the lens for `context`
+  context: text("context"), // Librarian-compiled synthesis of everything linked to this item (machine-derived, never user-editable)
+  contextCompiledAt: timestamp("context_compiled_at", { withTimezone: true }),
   link: text("link"),
   extra: jsonb("extra").notNull().default(sql`'{}'::jsonb`),
   externalRefs: jsonb("external_refs").notNull().default(sql`'{}'::jsonb`), // e.g. {clickup: "...", todoist: "..."}

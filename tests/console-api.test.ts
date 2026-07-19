@@ -217,6 +217,83 @@ describe("board + items", () => {
   });
 });
 
+describe("item description + compiled context", () => {
+  it("PATCH item with description works; the legacy note alias still works", async () => {
+    const [item] = await db
+      .insert(items)
+      .values({ boardId, name: `desc-item-${suffix}`, status: "open" })
+      .returning();
+
+    const r1 = await fetch(`${baseUrl}/api/v1/items/${item!.id}`, {
+      method: "PATCH",
+      headers: H,
+      body: JSON.stringify({ expected_version: 1, description: "hello description" }),
+    });
+    expect(r1.status).toBe(200);
+    const afterDescription = await db.query.items.findFirst({ where: eq(items.id, item!.id) });
+    expect(afterDescription!.description).toBe("hello description");
+
+    const r2 = await fetch(`${baseUrl}/api/v1/items/${item!.id}`, {
+      method: "PATCH",
+      headers: H,
+      body: JSON.stringify({ expected_version: 2, note: "legacy note text" }),
+    });
+    expect(r2.status).toBe(200);
+    const afterNote = await db.query.items.findFirst({ where: eq(items.id, item!.id) });
+    expect(afterNote!.description).toBe("legacy note text");
+  });
+
+  it("linking an item enqueues an item_context job; repeated links dedupe to one pending job", async () => {
+    const [item] = await db
+      .insert(items)
+      .values({ boardId, name: `link-ctx-item-${suffix}`, status: "open" })
+      .returning();
+    const [ideaA] = await db
+      .insert(ideas)
+      .values({ workspaceId: wsId, title: `link-ctx-idea-a-${suffix}`, createdByClientId: writer.id })
+      .returning();
+    const [ideaB] = await db
+      .insert(ideas)
+      .values({ workspaceId: wsId, title: `link-ctx-idea-b-${suffix}`, createdByClientId: writer.id })
+      .returning();
+
+    await fetch(`${baseUrl}/api/v1/link`, {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ from_type: "item", from_id: item!.id, to_type: "idea", to_id: ideaA!.id }),
+    });
+    await fetch(`${baseUrl}/api/v1/link`, {
+      method: "POST",
+      headers: H,
+      body: JSON.stringify({ from_type: "item", from_id: item!.id, to_type: "idea", to_id: ideaB!.id }),
+    });
+
+    const pending = await db.execute(
+      sql`SELECT id FROM jobs WHERE kind='item_context' AND subject_id=${item!.id}::uuid AND status='pending'`,
+    );
+    expect(pending.rows.length).toBe(1);
+  });
+
+  it("a compiled context surfaces in GET /api/v1/object/item/:id", async () => {
+    const [item] = await db
+      .insert(items)
+      .values({
+        boardId,
+        name: `ctx-item-${suffix}`,
+        status: "open",
+        context: "The Librarian's synthesis of everything linked to this item.",
+        contextCompiledAt: new Date(),
+      })
+      .returning();
+
+    const obj = (await (await fetch(`${baseUrl}/api/v1/object/item/${item!.id}`, { headers: H })).json()) as {
+      meta: { context: string | null; context_compiled_at: string | null };
+    };
+    expect(obj.meta.context).toContain("The Librarian's synthesis of everything linked to this item.");
+    expect(obj.meta.context_compiled_at).toBeTruthy();
+  });
+});
+
 describe("ideas + captures + vitals", () => {
   it("lists ideas warmth-ordered with latest note; detail has trail", async () => {
     const { idea } = await saveIdea(db, writer, {

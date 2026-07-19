@@ -305,7 +305,8 @@ export async function buildApp(db: Db) {
       lane?: string;
       priority?: string;
       due_date?: string;
-      note?: string;
+      description?: string;
+      note?: string; // deprecated alias for `description`
       link?: string;
     };
     if (!b?.board_id || !b?.name) return reply.code(400).send({ error: "board_id and name required" });
@@ -317,6 +318,7 @@ export async function buildApp(db: Db) {
           lane: b.lane,
           priority: b.priority,
           dueDate: b.due_date,
+          description: b.description,
           note: b.note,
           link: b.link,
           createdByClientId: req.apiClient!.id,
@@ -336,7 +338,8 @@ export async function buildApp(db: Db) {
       status?: string;
       progress?: number;
       due_date?: string;
-      note?: string;
+      description?: string;
+      note?: string; // deprecated alias for `description`
       link?: string;
     };
     if (!b?.expected_version) return reply.code(400).send({ error: "expected_version required" });
@@ -348,6 +351,7 @@ export async function buildApp(db: Db) {
     if (b.priority !== undefined) patch.priority = b.priority;
     if (b.status !== undefined) patch.status = b.status;
     if (b.progress !== undefined) patch.progress = b.progress;
+    if (b.description !== undefined) patch.description = b.description;
     if (b.note !== undefined) patch.note = b.note;
     if (b.link !== undefined) patch.link = b.link;
     if (b.due_date !== undefined) patch.dueDate = b.due_date;

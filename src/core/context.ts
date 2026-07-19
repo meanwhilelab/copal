@@ -84,7 +84,7 @@ export async function getContext(
   } else if (anchor.type === "board") {
     spine = await rows(
       db,
-      sql`SELECT it.id, it.name, it.status, it.lane, it.due_date, left(coalesce(it.note,''), 120) AS note_head
+      sql`SELECT it.id, it.name, it.status, it.lane, it.due_date, left(coalesce(it.description,''), 120) AS description_head
           FROM items it
           JOIN boards b ON b.id = it.board_id
           WHERE it.board_id = ${anchorId}::uuid AND it.sunk_at IS NULL
@@ -176,6 +176,11 @@ export async function getContext(
       ...(anchor.type === "idea"
         ? { description: labelDerived(String(anchorRow.description ?? ""), "machine-summary") }
         : {}),
+      // Librarian-compiled synthesis of the item's linked material, read through
+      // its description — lets a resuming agent skip re-deriving it.
+      ...(anchor.type === "item" && anchorRow.context
+        ? { context: labelDerived(String(anchorRow.context), "machine-summary") }
+        : {}),
     },
     spine: [],
     warm_ideas: [],
@@ -220,7 +225,7 @@ export async function getContext(
   let spineUsed = 0;
   let spineTaken = 0;
   for (const s of spine) {
-    const e = { ...s, ...(s.note_head ? { note_head: labelDerived(String(s.note_head), "machine-summary") } : {}) };
+    const e = { ...s, ...(s.description_head ? { description_head: labelDerived(String(s.description_head), "machine-summary") } : {}) };
     const cost = size(e);
     if (spineUsed + cost > spineMax || used + cost > budget) break;
     out.spine.push(e);

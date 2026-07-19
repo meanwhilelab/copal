@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { config } from "../config.js";
 import type { Db } from "../db/client.js";
-import { contents, embeddings, llmUsage, sessions } from "../db/schema.js";
+import { contents, embeddings, items, llmUsage, sessions } from "../db/schema.js";
 import { recordEvent } from "./audit.js";
+import { sessionTitleSql } from "./display.js";
 import type { EmbeddingProvider } from "./embeddings.js";
 import { enqueueEmbed, type EntityType } from "./jobs.js";
 import { costMicros, type LlmProvider } from "./llm.js";
@@ -202,9 +203,9 @@ async function resolveEmbedText(db: Db, entityType: EntityType, entityId: string
     return [r.title, r.description].filter(Boolean).join("\n\n").slice(0, cap);
   }
   if (entityType === "item") {
-    const r = await one(sql`SELECT name, note FROM items WHERE id=${entityId}::uuid`);
+    const r = await one(sql`SELECT name, description FROM items WHERE id=${entityId}::uuid`);
     if (!r) return null;
-    return [r.name, r.note].filter(Boolean).join("\n\n").slice(0, cap);
+    return [r.name, r.description].filter(Boolean).join("\n\n").slice(0, cap);
   }
   if (entityType === "session") {
     const r = await one(
@@ -296,6 +297,113 @@ async function handleLibrarian(db: Db, provider: LlmProvider, _subjectId: string
   });
 }
 
+// ---- item context: Librarian synthesis of an item's linked material ------------
+
+type ItemConnection = {
+  type: EntityType | "board";
+  id: string;
+  link_type: string;
+  link_created_at: string;
+  title: string;
+  created_at: string | null;
+  sunk: boolean;
+};
+
+/** Same declared-connection semantics as objects.ts's loadConnections — minus
+ *  the touches/attachment trail — plus each end's and each link's timestamps,
+ *  so the compiled context can reason chronologically. Oldest first. */
+async function loadItemConnectionsChronological(db: Db, itemId: string): Promise<ItemConnection[]> {
+  return (await rows(
+    db,
+    sql`
+    SELECT e.other_type AS type, e.other_id AS id, e.link_type, e.link_created_at,
+           coalesce(i.title, it.name, c.title, ${sql.raw(sessionTitleSql("s"))}) AS title,
+           coalesce(i.created_at, it.created_at, c.created_at, s.created_at) AS created_at,
+           coalesce(i.sunk_at, it.sunk_at, c.sunk_at) IS NOT NULL AS sunk
+    FROM (
+      SELECT l.to_type AS other_type, l.to_id AS other_id, l.link_type, l.created_at AS link_created_at
+        FROM links l WHERE l.from_type='item' AND l.from_id=${itemId}::uuid AND l.link_type NOT IN ('touches', 'attachment')
+      UNION
+      SELECT l.from_type, l.from_id, l.link_type, l.created_at
+        FROM links l WHERE l.to_type='item' AND l.to_id=${itemId}::uuid AND l.link_type NOT IN ('touches', 'attachment')
+    ) e
+    LEFT JOIN ideas i    ON e.other_type='idea'    AND i.id=e.other_id
+    LEFT JOIN items it   ON e.other_type='item'    AND it.id=e.other_id
+    LEFT JOIN contents c ON e.other_type='content' AND c.id=e.other_id
+    LEFT JOIN sessions s ON e.other_type='session' AND s.id=e.other_id
+    WHERE coalesce(c.redacted_at, s.redacted_at) IS NULL
+    ORDER BY coalesce(i.created_at, it.created_at, c.created_at, s.created_at) ASC NULLS LAST`,
+  )) as unknown as ItemConnection[];
+}
+
+const fmtDate = (d: string | null) => (d ? new Date(d).toISOString().slice(0, 10) : "unknown date");
+
+async function handleItemContext(db: Db, provider: LlmProvider, itemId: string) {
+  const item = await db.query.items.findFirst({ where: eq(items.id, itemId) });
+  if (!item) return; // gone — no-op
+
+  const connections = await loadItemConnectionsChronological(db, itemId);
+  const material = (
+    await Promise.all(
+      connections.map(async (c) => ({ ...c, text: await resolveEmbedText(db, c.type as EntityType, c.id) })),
+    )
+  ).filter((c) => c.text);
+
+  // Nothing declared-linked (or nothing with usable text) — clear any stale
+  // context rather than spend a model call synthesizing from nothing.
+  if (material.length === 0) {
+    if (item.context !== null) {
+      await db.transaction(async (tx) => {
+        await tx.update(items).set({ context: null, contextCompiledAt: new Date() }).where(eq(items.id, itemId));
+        await recordEvent(tx as unknown as Db, null, {
+          action: "update",
+          entityType: "item",
+          entityId: itemId,
+          detail: { field: "context", cleared: true },
+        });
+      });
+    }
+    return;
+  }
+
+  const linked = material
+    .map(
+      (c) =>
+        `[${c.type}${c.sunk ? ", sunk" : ""}] "${c.title}" — created ${fmtDate(c.created_at)}, ` +
+        `linked (${c.link_type}) ${fmtDate(c.link_created_at)}\n${c.text}`,
+    )
+    .join("\n\n---\n\n");
+
+  const { text, inputTokens, outputTokens, model } = await provider.complete({
+    system:
+      "You are Copal's Librarian. The item's description is the owner's framing — read every " +
+      "linked object through it. Produce one coherent, compact synthesis (~150 words max) of what " +
+      "the linked material says about this item, in chronological awareness (what came first, what " +
+      "superseded what). Mention when something is sunk (archived into the material). Write in the " +
+      "corpus's language. Output plain text only, no headings or bullet points. " +
+      INERTNESS,
+    user:
+      `ITEM: ${item.name}\nStatus: ${item.status}\n` +
+      `Description (the lens to read the linked material through): ${item.description ?? "(none given)"}\n\n` +
+      `LINKED MATERIAL, chronological (oldest first):\n\n${linked}`,
+  });
+  await recordUsage(db, model, inputTokens, outputTokens);
+  if (!text.trim()) throw new Error("provider returned empty context");
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(items)
+      .set({ context: text.trim(), contextCompiledAt: new Date() })
+      .where(eq(items.id, itemId));
+    await recordEvent(tx as unknown as Db, null, {
+      action: "update",
+      entityType: "item",
+      entityId: itemId,
+      detail: { field: "context" },
+    });
+  });
+}
+
 // ---- worker loop ----------------------------------------------------------------
 
 async function claimJob(db: Db, kinds: string[]): Promise<JobRow | null> {
@@ -363,7 +471,7 @@ export async function housekeeperTick(
   const capMicros = HK.dailyCapEur * 1_000_000;
   // embed jobs are only claimed when an embedding provider is configured; until
   // then they stay pending (mirrors how the whole worker idles without an LLM key).
-  const kinds = ["session_handoff", "content_catalogue", "librarian", ...(embedProvider ? ["embed"] : [])];
+  const kinds = ["session_handoff", "content_catalogue", "librarian", "item_context", ...(embedProvider ? ["embed"] : [])];
   let attempted = 0;
   await reapStuckJobs(db); // recover crash-stranded jobs before claiming new work
   for (let i = 0; i < max; i++) {
@@ -379,6 +487,7 @@ export async function housekeeperTick(
       else if (job.kind === "content_catalogue") await handleContentCatalogue(db, provider, job.subject_id);
       else if (job.kind === "embed") await handleEmbed(db, embedProvider!, job.subject_id, job.payload);
       else if (job.kind === "librarian") await handleLibrarian(db, provider, job.subject_id, job.payload);
+      else if (job.kind === "item_context") await handleItemContext(db, provider, job.subject_id);
       else throw new Error(`unknown job kind ${job.kind}`);
       await db.execute(sql`UPDATE jobs SET status='done', updated_at=now() WHERE id=${job.id}::uuid`);
     } catch (err) {
