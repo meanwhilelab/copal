@@ -117,6 +117,28 @@ export function ObjectView({
           ? `${meta.closed ? "closed" : "open"}${meta.redacted ? " · redacted" : ""}`
           : `${meta.source_type ?? ""}${meta.redacted ? " · redacted" : ""}`;
 
+  const connectionRow = (c: ObjectDetail["connections"][number]) => (
+    <div
+      key={`${c.type}-${c.id}`}
+      className={`flex items-center gap-2 px-2.5 py-2 rounded-[9px] border ${c.sunk ? "sunk-row" : ""}`}
+      style={{ borderColor: "var(--line)", background: "var(--ground)" }}
+    >
+      <button onClick={() => onNavigate(c.type, c.id)} className="flex-1 min-w-0 flex items-center gap-2 text-left cursor-pointer bg-transparent border-0">
+        <TypeBadge type={c.type} />
+        {c.sunk && <SunkChip />}
+        <span className="flex-1 min-w-0 text-[0.7813rem] truncate" style={{ color: "var(--text-2)" }}>{c.title}</span>
+      </button>
+      <button
+        title="Disconnect"
+        onClick={() => unlink.mutate({ a_type: d.type, a_id: d.id, b_type: c.type, b_id: c.id }, { onError: (e) => toast.error(e.message) })}
+        className="w-6 h-6 grid place-items-center rounded-md border-0 bg-transparent cursor-pointer opacity-50 hover:opacity-100"
+        style={{ color: "var(--pri-alta)" }}
+      >
+        ✕
+      </button>
+    </div>
+  );
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex-none px-6 pt-5 pb-4 border-b" style={{ borderColor: "var(--line)" }}>
@@ -161,31 +183,24 @@ export function ObjectView({
         {picking && <LinkPicker obj={d} onDone={() => setPicking(false)} />}
 
         <div className="flex flex-col gap-1.5 mb-6">
-          {d.connections.map((c) => (
-            <div
-              key={`${c.type}-${c.id}`}
-              className={`flex items-center gap-2 px-2.5 py-2 rounded-[9px] border ${c.sunk ? "sunk-row" : ""}`}
-              style={{ borderColor: "var(--line)", background: "var(--ground)" }}
-            >
-              <button onClick={() => onNavigate(c.type, c.id)} className="flex-1 min-w-0 flex items-center gap-2 text-left cursor-pointer bg-transparent border-0">
-                <TypeBadge type={c.type} />
-                {c.sunk && <SunkChip />}
-                <span className="flex-1 min-w-0 text-[0.7813rem] truncate" style={{ color: "var(--text-2)" }}>{c.title}</span>
-              </button>
-              <button
-                title="Disconnect"
-                onClick={() => unlink.mutate({ a_type: d.type, a_id: d.id, b_type: c.type, b_id: c.id }, { onError: (e) => toast.error(e.message) })}
-                className="w-6 h-6 grid place-items-center rounded-md border-0 bg-transparent cursor-pointer opacity-50 hover:opacity-100"
-                style={{ color: "var(--pri-alta)" }}
-              >
-                ✕
-              </button>
-            </div>
-          ))}
+          {d.connections.filter((c) => !c.sunk).map(connectionRow)}
           {d.connections.length === 0 && !picking && (
             <div className="text-[0.7188rem] py-1" style={{ color: "var(--text-3)" }}>Nothing connected yet — use ＋ link.</div>
           )}
         </div>
+
+        {d.connections.some((c) => c.sunk) && (
+          <>
+            <div className="flex items-center gap-2 mb-2.5">
+              <h3 className="kicker m-0">Connections</h3>
+              <span className="kicker" style={{ color: "var(--text-3)" }}>to sunk objects</span>
+              <div className="flex-1 h-px" style={{ background: "var(--line)" }} />
+            </div>
+            <div className="flex flex-col gap-1.5 mb-6">
+              {d.connections.filter((c) => c.sunk).map(connectionRow)}
+            </div>
+          </>
+        )}
 
         {d.resonances.length > 0 && (
           <>
