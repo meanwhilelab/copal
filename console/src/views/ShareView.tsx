@@ -84,7 +84,6 @@ export function ShareView() {
   if (item === null) return <NotActive />;
 
   const metaParts = [
-    item.board,
     item.status,
     item.lane,
     item.priority,
@@ -94,6 +93,12 @@ export function ShareView() {
   return (
     <Shell>
       <div className="flex items-center gap-2 mb-2.5">
+        {item.board && (
+          <span className="mono text-[0.625rem] uppercase tracking-wider px-1.5 py-0.5 rounded-md" style={{ color: "var(--lane-c)", background: "color-mix(in srgb, var(--lane-c) 15%, transparent)" }}>
+            {item.board}
+          </span>
+        )}
+        <span className="kicker" style={{ color: "var(--text-3)" }}>board item</span>
         {item.sunk && (
           <span className="mono text-[0.625rem]" style={{ color: "var(--amber)" }}>
             ↓ sunk
@@ -109,6 +114,10 @@ export function ShareView() {
 
       {item.description ? (
         <div className="mb-7">
+          <div className="flex items-center gap-2 mb-2.5">
+            <h3 className="kicker m-0">Description</h3>
+            <div className="flex-1 h-px" style={{ background: "var(--line)" }} />
+          </div>
           <Markdown>{item.description}</Markdown>
         </div>
       ) : null}
