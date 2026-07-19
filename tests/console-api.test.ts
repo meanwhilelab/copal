@@ -319,6 +319,9 @@ describe("item description + compiled context", () => {
     );
     expect(pending.rows.length).toBe(1);
 
+    const obj = await fetch(`${baseUrl}/api/v1/object/item/${item!.id}`, { headers: H });
+    expect(((await obj.json()) as { meta: { context_pending: boolean } }).meta.context_pending).toBe(true);
+
     const missing = await fetch(`${baseUrl}/api/v1/items/00000000-0000-0000-0000-000000000000/recompile-context`, {
       method: "POST",
       headers: H,

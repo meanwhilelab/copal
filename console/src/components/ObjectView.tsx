@@ -105,23 +105,31 @@ function LinkPicker({ obj, onDone }: { obj: ObjectDetail; onDone: () => void }) 
 }
 
 /** Manually re-enqueue the item_context compile — for when things changed a lot
- *  and you don't want to wait for (or rely on) the automatic triggers. */
-function RebuildContextButton({ itemId }: { itemId: string }) {
+ *  and you don't want to wait for (or rely on) the automatic triggers. While a
+ *  compile is queued/running (from ANY trigger, not just this button) the
+ *  button is disabled and says so; the page polls until the fresh context
+ *  replaces the band on its own. */
+function RebuildContextButton({ itemId, pending }: { itemId: string; pending: boolean }) {
   const rebuild = useRecompileContext();
+  const busy = pending || rebuild.isPending;
   return (
     <button
-      title="Ask the Librarian to recompile this item's context now"
+      title={
+        busy
+          ? "The Librarian is recompiling — the band updates by itself when done"
+          : "Ask the Librarian to recompile this item's context now"
+      }
       onClick={() =>
         rebuild.mutate(itemId, {
-          onSuccess: () => toast("Context rebuild queued — recompiles within a minute."),
+          onSuccess: () => toast("Context rebuild queued — the band updates when the Librarian finishes."),
           onError: (e) => toast.error(e instanceof Error ? e.message : "queue failed"),
         })
       }
-      disabled={rebuild.isPending}
-      className="mono text-[0.625rem] px-1.5 py-0.5 rounded cursor-pointer border disabled:opacity-50"
-      style={{ borderColor: "var(--line-2)", color: "var(--amber)", background: "transparent" }}
+      disabled={busy}
+      className={`mono text-[0.625rem] px-1.5 py-0.5 rounded border ${busy ? "cursor-default animate-pulse" : "cursor-pointer"}`}
+      style={{ borderColor: "var(--line-2)", color: busy ? "var(--text-3)" : "var(--amber)", background: "transparent" }}
     >
-      ⟳ rebuild
+      {busy ? "⟳ rebuilding…" : "⟳ rebuild"}
     </button>
   );
 }
@@ -523,7 +531,7 @@ export function ObjectView({
               <h3 className="kicker m-0">Context</h3>
               <span className="kicker" style={{ color: "var(--text-3)" }}>the Librarian's reading</span>
               <div className="flex-1 h-px" style={{ background: "var(--line)" }} />
-              <RebuildContextButton itemId={d.id} />
+              <RebuildContextButton itemId={d.id} pending={meta.context_pending === true} />
             </div>
             <div className="rounded-[9px] border border-dashed px-3 py-2.5" style={{ borderColor: "var(--line-2)", background: "var(--ground)" }}>
               <Markdown>{stripLabel(meta.context as string)}</Markdown>

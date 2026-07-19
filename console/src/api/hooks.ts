@@ -118,6 +118,10 @@ export const useObject = (type: string | null, id: string | null) =>
     queryKey: ["object", type, id],
     queryFn: () => api<ObjectDetail>(`/object/${type}/${id}`),
     enabled: !!type && !!id,
+    // While a context compile is in flight, poll so the band (and its
+    // compiled-at stamp) updates by itself the moment the Librarian finishes.
+    refetchInterval: (query) =>
+      (query.state.data?.meta as { context_pending?: boolean } | undefined)?.context_pending ? 4000 : false,
   });
 
 export const useLink = () => {

@@ -41,7 +41,8 @@ async function loadNative(db: Db, type: ObjectType, id: string) {
   if (type === "item") {
     const r = await one(
       db,
-      sql`SELECT i.name, i.description, i.context, i.context_compiled_at, i.status, i.lane, i.priority, i.progress, i.due_date, i.link, i.sunk_at, i.board_id, i.version, b.name AS board
+      sql`SELECT i.name, i.description, i.context, i.context_compiled_at, i.status, i.lane, i.priority, i.progress, i.due_date, i.link, i.sunk_at, i.board_id, i.version, b.name AS board,
+                 EXISTS(SELECT 1 FROM jobs j WHERE j.kind='item_context' AND j.subject_id=i.id AND j.status IN ('pending','running')) AS context_pending
           FROM items i JOIN boards b ON b.id=i.board_id WHERE i.id=${id}::uuid`,
     );
     if (!r) throw new NotFoundError(`item ${id}`);
@@ -61,6 +62,7 @@ async function loadNative(db: Db, type: ObjectType, id: string) {
         board_id: r.board_id,
         context: r.context ? labelDerived(r.context as string, "machine-summary") : null,
         context_compiled_at: r.context_compiled_at,
+        context_pending: r.context_pending === true,
         version: r.version,
       },
     };
