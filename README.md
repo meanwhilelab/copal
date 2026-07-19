@@ -25,7 +25,7 @@ And one promise: **nothing is ever deleted.** Entities can *sink* out of the for
 
 ## Features
 
-- 🧠 **One memory, many clients.** A single **MCP** + REST surface. Point Claude, ChatGPT, an agent framework, or a script at it — none of them owns your memory.
+- 🧠 **One memory, many clients.** A single **MCP** + REST surface. Point Claude, ChatGPT, an agent framework, or a script at it — none of them owns your memory. Agents get the full ladder: `search` to find, `get_context` to resume (budgeted summaries), `get_object` to deep-read any object in full.
 - 🔗 **Everything is a linkable object.** Ideas, items, sessions, and content connect to anything; explore your knowledge as a graph.
 - 🔎 **Semantic search + resonance.** Every capture self-embeds (**pgvector**, HNSW cosine); a nightly **Librarian** surfaces *discovered* connections between related material as advisory suggestions — proposals touching sunk material get their own quieter band ("from the material"), where accepting one can resurrect it.
 - 🧭 **The Librarian reads your item's material for you.** A work item's **description** is your framing — the lens. From it, the Librarian compiles the item's **Context**: a chronological synthesis of everything linked to the item (what came first, what superseded what, what has sunk), recompiled automatically as links and descriptions change, and handed to any agent that resumes on the item via `get_context`.
