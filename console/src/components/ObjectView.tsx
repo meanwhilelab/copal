@@ -92,6 +92,62 @@ function LinkPicker({ obj, onDone }: { obj: ObjectDetail; onDone: () => void }) 
   );
 }
 
+const PencilIcon = ({ size = 13 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+  </svg>
+);
+
+/** Inline-editable item title on the object page. The pencil is visible at
+ *  rest — hover-only affordances have proven undiscoverable here. */
+function ItemTitle({ d }: { d: ObjectDetail }) {
+  const update = useUpdateItem();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const meta = d.meta as Record<string, unknown>;
+  const commit = () => {
+    setEditing(false);
+    const next = draft.trim();
+    if (!next || next === d.title) return;
+    update.mutate(
+      { id: d.id, expected_version: meta.version as number, name: next },
+      { onError: (e) => toast.error(e instanceof Error ? e.message : "write failed") },
+    );
+  };
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") setEditing(false);
+        }}
+        className="display w-full font-medium text-[1.375rem] leading-tight rounded-md px-2 py-0.5 outline-none border"
+        style={{ background: "var(--ground)", borderColor: "var(--amber)", color: "var(--text)" }}
+      />
+    );
+  }
+  return (
+    <div className="flex items-start gap-2">
+      <h1 className="display m-0 font-medium text-[1.375rem] leading-tight flex-1 min-w-0">{d.title}</h1>
+      <button
+        title="Rename"
+        onClick={() => {
+          setDraft(d.title);
+          setEditing(true);
+        }}
+        className="flex-none w-7 h-7 grid place-items-center rounded-md border-0 bg-transparent cursor-pointer opacity-55 hover:opacity-100"
+        style={{ color: "var(--text-3)" }}
+      >
+        <PencilIcon />
+      </button>
+    </div>
+  );
+}
+
 /** Inline-editable item description — the lens the Librarian reads linked material through. */
 function ItemDescription({ d }: { d: ObjectDetail }) {
   const update = useUpdateItem();
@@ -154,12 +210,10 @@ function ItemDescription({ d }: { d: ObjectDetail }) {
         <button
           title="Edit description"
           onClick={start}
-          className="flex-none w-6 h-6 grid place-items-center rounded-md border-0 bg-transparent cursor-pointer opacity-0 group-hover/desc:opacity-100 transition-opacity"
+          className="flex-none w-6 h-6 grid place-items-center rounded-md border-0 bg-transparent cursor-pointer opacity-55 hover:opacity-100"
           style={{ color: "var(--text-3)" }}
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
-            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
-          </svg>
+          <PencilIcon />
         </button>
       </div>
     </div>
@@ -311,7 +365,11 @@ export function ObjectView({
           {d.type === "item" && <ShareButton itemId={d.id} />}
           {d.type === "item" && <AttachmentsButton itemId={d.id} />}
         </div>
-        <h1 className="display m-0 font-medium text-[1.375rem] leading-tight">{d.title}</h1>
+        {d.type === "item" ? (
+          <ItemTitle d={d} />
+        ) : (
+          <h1 className="display m-0 font-medium text-[1.375rem] leading-tight">{d.title}</h1>
+        )}
         <div className="mono text-[0.6563rem] mt-1.5" style={{ color: "var(--text-3)" }}>{metaLine}</div>
       </div>
 
