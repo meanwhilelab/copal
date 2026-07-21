@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 import { db, pool } from "../src/db/client.js";
@@ -16,6 +18,16 @@ let wsId: string;
 let boardId: string;
 let app: Awaited<ReturnType<typeof buildApp>>;
 let baseUrl: string;
+
+// buildApp reads console/dist/index.html for the /s/:token unfurl route (see
+// src/rest/server.ts). A dev checkout that hasn't run `npm run console:build`
+// yet won't have it — write a minimal fixture so the share-unfurl tests below
+// are deterministic either way; leave a real build untouched, and clean up
+// only what we created.
+const consoleDist = new URL("../console/dist", import.meta.url).pathname;
+const indexHtmlPath = join(consoleDist, "index.html");
+let createdConsoleDistDir = false;
+let createdIndexHtmlFixture = false;
 
 const H = { authorization: `Bearer ${writerToken}`, "content-type": "application/json" };
 
@@ -43,6 +55,19 @@ beforeAll(async () => {
     })
     .returning();
   boardId = b!.id;
+
+  if (!existsSync(indexHtmlPath)) {
+    if (!existsSync(consoleDist)) {
+      mkdirSync(consoleDist, { recursive: true });
+      createdConsoleDistDir = true;
+    }
+    writeFileSync(
+      indexHtmlPath,
+      '<!doctype html><html><head><meta charset="UTF-8" /><title>Copal</title></head><body><div id="root"></div></body></html>',
+    );
+    createdIndexHtmlFixture = true;
+  }
+
   app = await buildApp(db);
   await app.listen({ port: 0, host: "127.0.0.1" });
   const addr = app.server.address();
@@ -51,6 +76,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app.close();
+  if (createdIndexHtmlFixture) rmSync(indexHtmlPath, { force: true });
+  if (createdConsoleDistDir) rmSync(consoleDist, { recursive: true, force: true });
   await db.execute(sql`DELETE FROM proposals WHERE from_id IN (SELECT id FROM ideas WHERE created_by_client_id = ${writer.id}::uuid) OR to_id IN (SELECT id FROM ideas WHERE created_by_client_id = ${writer.id}::uuid)`);
   await db.execute(sql`DELETE FROM links WHERE created_by_client_id = ${writer.id}::uuid OR from_id IN (SELECT id FROM sessions WHERE client_id=${writer.id}::uuid)`);
   await db.execute(sql`DELETE FROM jobs WHERE subject_id IN (SELECT id FROM sessions WHERE client_id=${writer.id}::uuid)`);
@@ -58,6 +85,8 @@ afterAll(async () => {
   await db.execute(sql`DELETE FROM sessions WHERE client_id = ${writer.id}::uuid`);
   await db.execute(sql`DELETE FROM ideas WHERE created_by_client_id = ${writer.id}::uuid`);
   await db.execute(sql`DELETE FROM contents WHERE created_by_client_id = ${writer.id}::uuid`);
+  // item_shares has no cascade off items — must go before the items delete below.
+  await db.execute(sql`DELETE FROM item_shares WHERE item_id IN (SELECT id FROM items WHERE board_id=${boardId}::uuid)`);
   await db.delete(items).where(eq(items.boardId, boardId));
   await db.delete(boards).where(eq(boards.id, boardId));
   await db.execute(sql`DELETE FROM api_clients WHERE name LIKE ${"con-%" + suffix}`);
@@ -274,6 +303,33 @@ describe("item description + compiled context", () => {
     expect(pending.rows.length).toBe(1);
   });
 
+  it("POST /items/:id/recompile-context enqueues manually and dedupes with pending", async () => {
+    const [item] = await db
+      .insert(items)
+      .values({ boardId, name: `rebuild-ctx-item-${suffix}`, status: "open" })
+      .returning();
+
+    const first = await fetch(`${baseUrl}/api/v1/items/${item!.id}/recompile-context`, { method: "POST", headers: H, body: "{}" });
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual({ enqueued: true });
+    await fetch(`${baseUrl}/api/v1/items/${item!.id}/recompile-context`, { method: "POST", headers: H, body: "{}" });
+
+    const pending = await db.execute(
+      sql`SELECT id FROM jobs WHERE kind='item_context' AND subject_id=${item!.id}::uuid AND status='pending'`,
+    );
+    expect(pending.rows.length).toBe(1);
+
+    const obj = await fetch(`${baseUrl}/api/v1/object/item/${item!.id}`, { headers: H });
+    expect(((await obj.json()) as { meta: { context_pending: boolean } }).meta.context_pending).toBe(true);
+
+    const missing = await fetch(`${baseUrl}/api/v1/items/00000000-0000-0000-0000-000000000000/recompile-context`, {
+      method: "POST",
+      headers: H,
+      body: "{}",
+    });
+    expect(missing.status).toBe(404);
+  });
+
   it("a compiled context surfaces in GET /api/v1/object/item/:id", async () => {
     const [item] = await db
       .insert(items)
@@ -291,6 +347,23 @@ describe("item description + compiled context", () => {
     };
     expect(obj.meta.context).toContain("The Librarian's synthesis of everything linked to this item.");
     expect(obj.meta.context_compiled_at).toBeTruthy();
+  });
+
+  it("GET /api/v1/object/item/:id returns the item's link", async () => {
+    const [item] = await db
+      .insert(items)
+      .values({
+        boardId,
+        name: `link-meta-item-${suffix}`,
+        status: "open",
+        link: "https://linear.app/copal/issue/COP-42/ship-the-thing",
+      })
+      .returning();
+
+    const obj = (await (await fetch(`${baseUrl}/api/v1/object/item/${item!.id}`, { headers: H })).json()) as {
+      meta: { link: string | null };
+    };
+    expect(obj.meta.link).toBe("https://linear.app/copal/issue/COP-42/ship-the-thing");
   });
 });
 
@@ -434,5 +507,156 @@ describe("proposals", () => {
     expect(p).toBeDefined();
     expect(p!.from_sunk).toBe(true);
     expect(p!.to_sunk).toBe(false);
+  });
+});
+
+describe("item share links", () => {
+  let shareItemId: string;
+  let shareToken: string;
+  // Bodyless POST/DELETE: no content-type — Fastify's JSON parser 400s a
+  // request that declares application/json but sends no bytes.
+  const authOnly = { authorization: H.authorization };
+
+  it("creates a share once, returning a token; a second create returns existing:true without one", async () => {
+    const [item] = await db
+      .insert(items)
+      .values({
+        boardId,
+        name: `share-item-${suffix}`,
+        status: "open",
+        description: "share me",
+        context: "The Librarian's synthesis of everything linked to this item.",
+        contextCompiledAt: new Date(),
+      })
+      .returning();
+    shareItemId = item!.id;
+
+    const before = await fetch(`${baseUrl}/api/v1/items/${shareItemId}/share`, { headers: H });
+    expect(before.status).toBe(200);
+    expect((await before.json()) as { active: boolean }).toEqual({ active: false });
+
+    const create1 = await fetch(`${baseUrl}/api/v1/items/${shareItemId}/share`, { method: "POST", headers: authOnly });
+    expect(create1.status).toBe(200);
+    const body1 = (await create1.json()) as { existing: boolean; token?: string };
+    expect(body1.existing).toBe(false);
+    expect(body1.token).toBeTruthy();
+    expect(body1.token!.startsWith("cops_")).toBe(true);
+    shareToken = body1.token!;
+
+    const create2 = await fetch(`${baseUrl}/api/v1/items/${shareItemId}/share`, { method: "POST", headers: authOnly });
+    expect(create2.status).toBe(200);
+    const body2 = (await create2.json()) as { existing: boolean; token?: string };
+    expect(body2.existing).toBe(true);
+    expect(body2.token).toBeUndefined();
+
+    const status = await fetch(`${baseUrl}/api/v1/items/${shareItemId}/share`, { headers: H });
+    const statusBody = (await status.json()) as { active: boolean; created_at?: string };
+    expect(statusBody.active).toBe(true);
+    expect(statusBody.created_at).toBeTruthy();
+  });
+
+  it("public GET (no auth header) returns the restricted shape only", async () => {
+    const res = await fetch(`${baseUrl}/api/public/share/${shareToken}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.name).toBe(`share-item-${suffix}`);
+    expect(body.description).toBe("share me");
+    expect(body.context).toContain("The Librarian's synthesis of everything linked to this item.");
+    expect(body.status).toBe("open");
+    expect(body.sunk).toBe(false);
+    // never leaks connections/resonances/other-object ids — identity + description + context only
+    expect(body).not.toHaveProperty("connections");
+    expect(body).not.toHaveProperty("resonances");
+    expect(body).not.toHaveProperty("id");
+    expect(body).not.toHaveProperty("board_id");
+  });
+
+  it("an unknown token 404s with the uniform error shape (no enumeration)", async () => {
+    const res = await fetch(`${baseUrl}/api/public/share/cops_${"a".repeat(43)}`);
+    expect(res.status).toBe(404);
+    expect((await res.json()) as { error: string }).toEqual({ error: "not found" });
+  });
+
+  it("revoking kills the link; the same token now 404s identically to unknown", async () => {
+    const revoke = await fetch(`${baseUrl}/api/v1/items/${shareItemId}/share`, { method: "DELETE", headers: authOnly });
+    expect(revoke.status).toBe(200);
+
+    const res = await fetch(`${baseUrl}/api/public/share/${shareToken}`);
+    expect(res.status).toBe(404);
+    expect((await res.json()) as { error: string }).toEqual({ error: "not found" });
+
+    const status = await fetch(`${baseUrl}/api/v1/items/${shareItemId}/share`, { headers: H });
+    expect((await status.json()) as { active: boolean }).toEqual({ active: false });
+  });
+});
+
+describe("share-link unfurl (/s/:token) + noindex posture", () => {
+  const authOnly = { authorization: H.authorization };
+  let unfurlItemId: string;
+  let unfurlToken: string;
+  // Ampersand + quote in the name exercise HTML-escaping of the injected og:title.
+  const itemName = `Ship & "Sail" ${suffix}`;
+
+  it("active share: GET /s/<token> is 200 HTML with an escaped, item-specific og:title", async () => {
+    const [item] = await db
+      .insert(items)
+      .values({ boardId, name: itemName, status: "open", description: "**bold** plan for the launch" })
+      .returning();
+    unfurlItemId = item!.id;
+
+    const created = await fetch(`${baseUrl}/api/v1/items/${unfurlItemId}/share`, { method: "POST", headers: authOnly });
+    const body = (await created.json()) as { token: string };
+    unfurlToken = body.token;
+
+    const res = await fetch(`${baseUrl}/s/${unfurlToken}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const html = await res.text();
+
+    const escapedName = "Ship &amp; &quot;Sail&quot; " + suffix;
+    expect(html).toContain(`<meta property="og:title" content="${escapedName} — Copal" />`);
+    expect(html).not.toContain(`content="${itemName}`); // the raw, unescaped name never appears
+    expect(html).toContain(`<meta property="og:site_name" content="Copal" />`);
+    expect(html).toContain(`<meta property="og:type" content="article" />`);
+    expect(html).toContain(`<meta property="og:description" content="bold plan for the launch" />`);
+    expect(html).toContain(`<meta property="og:url" content="${baseUrl}/s/${unfurlToken}" />`);
+    expect(html).toContain(`<meta property="og:image" content="${baseUrl}/copal-social-card.png" />`);
+    expect(html).toContain(`<meta name="twitter:card" content="summary_large_image" />`);
+    // the SPA shell still boots normally from this HTML
+    expect(html).toContain('<div id="root"></div>');
+  });
+
+  it("revoked/unknown token: 200 HTML with the generic Copal block, no item-name leakage", async () => {
+    await fetch(`${baseUrl}/api/v1/items/${unfurlItemId}/share`, { method: "DELETE", headers: authOnly });
+
+    const res = await fetch(`${baseUrl}/s/${unfurlToken}`);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain(`<meta property="og:title" content="Copal" />`);
+    expect(html).toContain(
+      `<meta property="og:description" content="A shared read-only item — description, status, and the Librarian&#39;s context." />`,
+    );
+    expect(html).not.toContain(itemName);
+
+    const unknown = await fetch(`${baseUrl}/s/cops_${"a".repeat(43)}`);
+    expect(unknown.status).toBe(200);
+    expect(await unknown.text()).toContain(`<meta property="og:title" content="Copal" />`);
+  });
+
+  it("X-Robots-Tag: noindex, nofollow is set on API responses and the share page", async () => {
+    const api = await fetch(`${baseUrl}/api/v1/vitals`, { headers: H });
+    expect(api.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+
+    const share = await fetch(`${baseUrl}/s/cops_${"b".repeat(43)}`);
+    expect(share.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+  });
+
+  it("GET /robots.txt allows crawling (no Disallow) so bots can see the noindex signal", async () => {
+    const res = await fetch(`${baseUrl}/robots.txt`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/plain");
+    const body = await res.text();
+    expect(body).toContain("User-agent: *");
+    expect(body).not.toMatch(/Disallow:\s*\/\S/); // "Disallow:" with no path = allow-all
   });
 });

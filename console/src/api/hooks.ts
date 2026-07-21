@@ -6,6 +6,7 @@ import type {
   Capture,
   ContentDetail,
   ContentRow,
+  CreateShareResult,
   DeadJob,
   IdeaDetail,
   IdeaListEntry,
@@ -16,6 +17,7 @@ import type {
   SearchResult,
   SessionDetail,
   SessionRow,
+  ShareStatus,
   Vitals,
   Workspace,
 } from "./types.js";
@@ -116,6 +118,10 @@ export const useObject = (type: string | null, id: string | null) =>
     queryKey: ["object", type, id],
     queryFn: () => api<ObjectDetail>(`/object/${type}/${id}`),
     enabled: !!type && !!id,
+    // While a context compile is in flight, poll so the band (and its
+    // compiled-at stamp) updates by itself the moment the Librarian finishes.
+    refetchInterval: (query) =>
+      (query.state.data?.meta as { context_pending?: boolean } | undefined)?.context_pending ? 4000 : false,
   });
 
 export const useLink = () => {
@@ -257,6 +263,14 @@ export const useUpdateItem = () => {
   });
 };
 
+export const useRecompileContext = () => {
+  const inv = useInvalidate();
+  return useMutation({
+    mutationFn: (itemId: string) => api(`/items/${itemId}/recompile-context`, { method: "POST" }),
+    onSettled: () => inv.object(),
+  });
+};
+
 export const useSink = () => {
   const inv = useInvalidate();
   return useMutation({
@@ -276,6 +290,29 @@ export const useUnsink = () => {
       inv.board();
       inv.ideas();
     },
+  });
+};
+
+export const useShareStatus = (itemId: string) =>
+  useQuery({
+    queryKey: ["share", itemId],
+    queryFn: () => api<ShareStatus>(`/items/${itemId}/share`),
+    enabled: !!itemId,
+  });
+
+export const useCreateShare = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (itemId: string) => api<CreateShareResult>(`/items/${itemId}/share`, { method: "POST" }),
+    onSettled: (_r, _e, itemId) => void qc.invalidateQueries({ queryKey: ["share", itemId] }),
+  });
+};
+
+export const useRevokeShare = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (itemId: string) => api(`/items/${itemId}/share`, { method: "DELETE" }),
+    onSettled: (_r, _e, itemId) => void qc.invalidateQueries({ queryKey: ["share", itemId] }),
   });
 };
 

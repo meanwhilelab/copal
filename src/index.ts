@@ -31,7 +31,7 @@ const embedProvider = embeddingProviderFromEnv();
 if (provider) {
   const tick = async () => {
     try {
-      const n = await housekeeperTick(db, provider, embedProvider);
+      const n = await housekeeperTick(db, provider, embedProvider, config.capture.linear.apiKey ?? null);
       await recordTick(db, "housekeeper"); // liveness heartbeat for /status
       if (n > 0) app.log.info({ jobs: n, model: provider.model }, "housekeeper tick");
     } catch (err) {

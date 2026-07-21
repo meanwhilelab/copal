@@ -153,3 +153,12 @@ export async function updateItem(
     return row;
   });
 }
+
+/** Manual "Rebuild context": re-enqueue the item_context compile on demand.
+ *  jobs_pending_uq collapses this with any recompile already queued. */
+export async function requestContextRebuild(db: Db, itemId: string) {
+  const exists = await db.query.items.findFirst({ where: eq(items.id, itemId), columns: { id: true } });
+  if (!exists) throw new NotFoundError(`item ${itemId}`);
+  await enqueueItemContext(db, itemId);
+  return { enqueued: true };
+}

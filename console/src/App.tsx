@@ -8,6 +8,7 @@ import type { BoardSummary } from "./api/types.js";
 import { BoardView } from "./views/Board.js";
 import { ExploreView } from "./views/Explore.js";
 import { ProposalsView } from "./views/Proposals.js";
+import { ShareView } from "./views/ShareView.js";
 import { DeadJobsPanel } from "./components/DeadJobs.js";
 import { ObjectView } from "./components/ObjectView.js";
 import { SearchOverlay } from "./components/SearchOverlay.js";
@@ -327,6 +328,21 @@ export default function App() {
     window.addEventListener("copal:unauthorized", onUnauth);
     return () => window.removeEventListener("copal:unauthorized", onUnauth);
   }, []);
+
+  // Public share links render outside the unlock gate entirely: no stored
+  // token is read, no bearer is attached, and it never redirects to Unlock —
+  // this is the one page in the console meant for people with no Copal auth.
+  if (window.location.pathname.startsWith("/s/")) {
+    return (
+      <BrowserRouter>
+        <Routes>
+          <Route path="/s/:token" element={<ShareView />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+    );
+  }
+
   if (!unlocked) return <Unlock onUnlock={() => setUnlocked(true)} />;
   return (
     <QueryClientProvider client={qc}>

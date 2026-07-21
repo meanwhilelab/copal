@@ -57,6 +57,16 @@ export async function uploadAttachment(itemId: string, file: File) {
   return res.json();
 }
 
+/** Fetch a public share view: no bearer token, no 401 → unlock-screen dance
+ *  (this runs for visitors who have no Copal auth at all). Null on 404 (unknown
+ *  or revoked token) or any network failure — the caller renders the quiet
+ *  "no longer active" state, uniformly, without knowing which. */
+export async function fetchPublicShare<T>(token: string): Promise<T | null> {
+  const res = await fetch(`/api/public/share/${encodeURIComponent(token)}`).catch(() => null);
+  if (!res || !res.ok) return null;
+  return res.json() as Promise<T>;
+}
+
 /** Fetch an attachment with auth and open it in a new tab (inline preview). */
 export async function openAttachment(contentId: string) {
   const res = await fetch(`/api/v1/attachments/${contentId}/download`, {

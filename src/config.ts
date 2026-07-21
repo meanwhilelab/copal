@@ -92,6 +92,12 @@ export const config = {
       textCapChars: 30_000, // ~8k tokens, the API per-request ceiling
       batchSize: 96, // inputs per embeddings request during backfill
     },
+    // Linear issue enrichment (optional): item_context compiles fetch the live
+    // issue when an item's link points at one and a key is configured. Unset =
+    // exactly today's behavior.
+    linear: {
+      apiKey: process.env.LINEAR_API_KEY,
+    },
     // The Librarian (phase 2): nightly resonance → advisory proposals.
     librarian: {
       intervalMs: Number(process.env.LIBRARIAN_INTERVAL_MS ?? 24 * 60 * 60_000),

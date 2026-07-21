@@ -1,8 +1,31 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
-import { useLink, useObject, useRedact, useSearch, useUnlink, useUnsink, useUpdateItem } from "../api/hooks.js";
-import { stripLabel, type ObjectDetail } from "../api/types.js";
-import { SinkGlyph } from "../views/Board.js";
+import {
+  useBoard,
+  useCreateShare,
+  useLink,
+  useObject,
+  useRecompileContext,
+  useRedact,
+  useRevokeShare,
+  useSearch,
+  useShareStatus,
+  useSink,
+  useUnlink,
+  useUnsink,
+  useUpdateItem,
+} from "../api/hooks.js";
+import { stripLabel, type Item, type ObjectDetail } from "../api/types.js";
+import {
+  DueCell,
+  LaneCell,
+  LinkCell,
+  PriorityCell,
+  ProgressCell,
+  SinkGlyph,
+  StatusDot,
+  type Ctx,
+} from "../views/Board.js";
 import { AttachmentsButton } from "./AttachmentsButton.js";
 import { Markdown } from "./Markdown.js";
 
@@ -81,6 +104,92 @@ function LinkPicker({ obj, onDone }: { obj: ObjectDetail; onDone: () => void }) 
   );
 }
 
+/** Manually re-enqueue the item_context compile — for when things changed a lot
+ *  and you don't want to wait for (or rely on) the automatic triggers. While a
+ *  compile is queued/running (from ANY trigger, not just this button) the
+ *  button is disabled and says so; the page polls until the fresh context
+ *  replaces the band on its own. */
+function RebuildContextButton({ itemId, pending }: { itemId: string; pending: boolean }) {
+  const rebuild = useRecompileContext();
+  const busy = pending || rebuild.isPending;
+  return (
+    <button
+      title={
+        busy
+          ? "The Librarian is recompiling — the band updates by itself when done"
+          : "Ask the Librarian to recompile this item's context now"
+      }
+      onClick={() =>
+        rebuild.mutate(itemId, {
+          onSuccess: () => toast("Context rebuild queued — the band updates when the Librarian finishes."),
+          onError: (e) => toast.error(e instanceof Error ? e.message : "queue failed"),
+        })
+      }
+      disabled={busy}
+      className={`mono text-[0.625rem] px-1.5 py-0.5 rounded border ${busy ? "cursor-default animate-pulse" : "cursor-pointer"}`}
+      style={{ borderColor: "var(--line-2)", color: busy ? "var(--text-3)" : "var(--amber)", background: "transparent" }}
+    >
+      {busy ? "⟳ rebuilding…" : "⟳ rebuild"}
+    </button>
+  );
+}
+
+const PencilIcon = ({ size = 13 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+  </svg>
+);
+
+/** Inline-editable item title on the object page. The pencil is visible at
+ *  rest — hover-only affordances have proven undiscoverable here. */
+function ItemTitle({ d }: { d: ObjectDetail }) {
+  const update = useUpdateItem();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const meta = d.meta as Record<string, unknown>;
+  const commit = () => {
+    setEditing(false);
+    const next = draft.trim();
+    if (!next || next === d.title) return;
+    update.mutate(
+      { id: d.id, expected_version: meta.version as number, name: next },
+      { onError: (e) => toast.error(e instanceof Error ? e.message : "write failed") },
+    );
+  };
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") setEditing(false);
+        }}
+        className="display w-full font-medium text-[1.375rem] leading-tight rounded-md px-2 py-0.5 outline-none border"
+        style={{ background: "var(--ground)", borderColor: "var(--amber)", color: "var(--text)" }}
+      />
+    );
+  }
+  return (
+    <div className="flex items-start gap-2">
+      <h1 className="display m-0 font-medium text-[1.375rem] leading-tight flex-1 min-w-0">{d.title}</h1>
+      <button
+        title="Rename"
+        onClick={() => {
+          setDraft(d.title);
+          setEditing(true);
+        }}
+        className="flex-none w-7 h-7 grid place-items-center rounded-md border-0 bg-transparent cursor-pointer opacity-55 hover:opacity-100"
+        style={{ color: "var(--text-3)" }}
+      >
+        <PencilIcon />
+      </button>
+    </div>
+  );
+}
+
 /** Inline-editable item description — the lens the Librarian reads linked material through. */
 function ItemDescription({ d }: { d: ObjectDetail }) {
   const update = useUpdateItem();
@@ -143,12 +252,10 @@ function ItemDescription({ d }: { d: ObjectDetail }) {
         <button
           title="Edit description"
           onClick={start}
-          className="flex-none w-6 h-6 grid place-items-center rounded-md border-0 bg-transparent cursor-pointer opacity-0 group-hover/desc:opacity-100 transition-opacity"
+          className="flex-none w-6 h-6 grid place-items-center rounded-md border-0 bg-transparent cursor-pointer opacity-55 hover:opacity-100"
           style={{ color: "var(--text-3)" }}
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
-            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
-          </svg>
+          <PencilIcon />
         </button>
       </div>
     </div>
@@ -160,6 +267,160 @@ function ItemDescription({ d }: { d: ObjectDetail }) {
     >
       + description
     </button>
+  );
+}
+
+/** Header control for an item's public share link. Not shared → "Share" mints a
+ *  fresh token, copies the URL, and shows it once (the plaintext is never
+ *  retrievable again — the server only ever stores its hash). Shared → the only
+ *  action left is Revoke; re-sharing after that mints a genuinely new URL. */
+function ShareButton({ itemId }: { itemId: string }) {
+  const status = useShareStatus(itemId);
+  const create = useCreateShare();
+  const revoke = useRevokeShare();
+
+  if (status.data?.active) {
+    return (
+      <button
+        title="Revoke this link — the URL can't be re-shown, so sharing again mints a fresh one"
+        onClick={() =>
+          revoke.mutate(itemId, {
+            onSuccess: () => toast("Link revoked."),
+            onError: (e) => toast.error(e instanceof Error ? e.message : "revoke failed"),
+          })
+        }
+        disabled={revoke.isPending}
+        className="text-[0.7188rem] cursor-pointer bg-transparent border rounded-md px-2 py-1 flex items-center gap-1.5 disabled:opacity-50"
+        style={{ borderColor: "var(--amber)", color: "var(--amber)" }}
+      >
+        <span className="w-1.5 h-1.5 rounded-full flex-none" style={{ background: "var(--amber)" }} />
+        Shared · Revoke
+      </button>
+    );
+  }
+
+  return (
+    <button
+      title="Create a public read-only link to this item"
+      disabled={create.isPending || status.isLoading}
+      onClick={() =>
+        create.mutate(itemId, {
+          onSuccess: (res) => {
+            if (res.existing) {
+              toast("Already shared — the link can't be re-shown; revoke to mint a fresh one.");
+              return;
+            }
+            const url = `${location.origin}/s/${res.token}`;
+            navigator.clipboard?.writeText(url).catch(() => {});
+            toast("Link copied — this is the only time it's shown. Revoke to replace it.");
+          },
+          onError: (e) => toast.error(e instanceof Error ? e.message : "share failed"),
+        })
+      }
+      className="text-[0.7188rem] cursor-pointer bg-transparent border rounded-md px-2 py-1 disabled:opacity-50"
+      style={{ borderColor: "var(--line-2)", color: "var(--text-2)" }}
+    >
+      Share
+    </button>
+  );
+}
+
+/** A single editable property, always bordered so the affordance reads at
+ *  rest — no hover-only reveals (an explicit lesson from the board). */
+function PropChip({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div
+      className="inline-flex items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-full border"
+      style={{ borderColor: "var(--line)", background: "var(--surface)" }}
+    >
+      <span className="kicker">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+/** The item's status/lane/priority/due/progress/link, editable right on the
+ *  leaf page — the same controls and optimistic-concurrency semantics as the
+ *  board, reused via export rather than reimplemented. Board name is shown
+ *  plain (a board move isn't a property edit here). */
+function ItemProperties({ d }: { d: ObjectDetail }) {
+  const meta = d.meta as Record<string, unknown>;
+  const boardId = (meta.board_id as string) ?? null;
+  const detail = useBoard(boardId, false);
+  const update = useUpdateItem();
+  const sink = useSink();
+  const unsink = useUnsink();
+
+  const statuses = detail.data?.board.statusSet ?? [];
+  const lanes = detail.data?.board.laneSet ?? [];
+  const statusMap = new Map(statuses.map((s) => [s.key, s]));
+  const laneMap = new Map(lanes.map((l) => [l.key, l]));
+
+  if (!detail.data) {
+    // Pre-load fallback — same info the properties row will show, just static.
+    return (
+      <div className="mono text-[0.6563rem] mt-1.5" style={{ color: "var(--text-3)" }}>
+        {[meta.board, meta.status, meta.lane, meta.priority].filter(Boolean).join(" · ")}
+      </div>
+    );
+  }
+
+  const item: Item = {
+    id: d.id,
+    boardId: boardId ?? "",
+    name: d.title,
+    lane: (meta.lane as string) ?? null,
+    priority: (meta.priority as string) ?? null,
+    status: meta.status as string,
+    progress: (meta.progress as number) ?? 0,
+    dueDate: (meta.due_date as string) ?? null,
+    description: null,
+    link: (meta.link as string) ?? null,
+    version: meta.version as number,
+    sunkAt: null,
+  };
+
+  const ctx: Ctx = {
+    laneMap,
+    statusMap,
+    statuses,
+    editing: null,
+    setEditing: () => {},
+    update,
+    sink,
+    unsink,
+    onOpenObject: () => {},
+    settleId: null,
+    settle: () => {},
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 mt-2">
+      <span className="mono text-[0.6875rem]" style={{ color: "var(--text-3)" }}>{meta.board as string}</span>
+      <PropChip label="Status">
+        <StatusDot item={item} ctx={ctx} />
+        <span className="text-[0.75rem]" style={{ color: "var(--text-2)" }}>{statusMap.get(item.status)?.label ?? item.status}</span>
+      </PropChip>
+      <PropChip label="Lane">
+        <LaneCell item={item} ctx={ctx} />
+      </PropChip>
+      <PropChip label="Priority">
+        <PriorityCell item={item} ctx={ctx} />
+      </PropChip>
+      <PropChip label="Due">
+        <DueCell item={item} ctx={ctx} />
+      </PropChip>
+      <PropChip label="Progress">
+        <div style={{ width: 90 }}>
+          <ProgressCell item={item} ctx={ctx} />
+        </div>
+      </PropChip>
+      <PropChip label="Link">
+        <div className="max-w-[220px]">
+          <LinkCell item={item} ctx={ctx} />
+        </div>
+      </PropChip>
+    </div>
   );
 }
 
@@ -191,13 +452,11 @@ export function ObjectView({
 
   const meta = d.meta as Record<string, unknown>;
   const metaLine =
-    d.type === "item"
-      ? `${meta.board ?? ""} · ${meta.status ?? ""}${meta.lane ? " · " + meta.lane : ""}${meta.priority ? " · " + meta.priority : ""}`
-      : d.type === "idea"
-        ? `${meta.warmth ?? ""} · ${meta.touch_count ?? 0} touches`
-        : d.type === "session"
-          ? `${meta.closed ? "closed" : "open"}${meta.redacted ? " · redacted" : ""}`
-          : `${meta.source_type ?? ""}${meta.redacted ? " · redacted" : ""}`;
+    d.type === "idea"
+      ? `${meta.warmth ?? ""} · ${meta.touch_count ?? 0} touches`
+      : d.type === "session"
+        ? `${meta.closed ? "closed" : "open"}${meta.redacted ? " · redacted" : ""}`
+        : `${meta.source_type ?? ""}${meta.redacted ? " · redacted" : ""}`;
 
   const connectionRow = (c: ObjectDetail["connections"][number]) => (
     <div
@@ -242,10 +501,19 @@ export function ObjectView({
             </button>
           )}
           <div className="flex-1" />
+          {d.type === "item" && <ShareButton itemId={d.id} />}
           {d.type === "item" && <AttachmentsButton itemId={d.id} />}
         </div>
-        <h1 className="display m-0 font-medium text-[1.375rem] leading-tight">{d.title}</h1>
-        <div className="mono text-[0.6563rem] mt-1.5" style={{ color: "var(--text-3)" }}>{metaLine}</div>
+        {d.type === "item" ? (
+          <ItemTitle d={d} />
+        ) : (
+          <h1 className="display m-0 font-medium text-[1.375rem] leading-tight">{d.title}</h1>
+        )}
+        {d.type === "item" ? (
+          <ItemProperties d={d} />
+        ) : (
+          <div className="mono text-[0.6563rem] mt-1.5" style={{ color: "var(--text-3)" }}>{metaLine}</div>
+        )}
       </div>
 
       <div className="flex-1 overflow-auto px-6 py-5">
@@ -263,6 +531,7 @@ export function ObjectView({
               <h3 className="kicker m-0">Context</h3>
               <span className="kicker" style={{ color: "var(--text-3)" }}>the Librarian's reading</span>
               <div className="flex-1 h-px" style={{ background: "var(--line)" }} />
+              <RebuildContextButton itemId={d.id} pending={meta.context_pending === true} />
             </div>
             <div className="rounded-[9px] border border-dashed px-3 py-2.5" style={{ borderColor: "var(--line-2)", background: "var(--ground)" }}>
               <Markdown>{stripLabel(meta.context as string)}</Markdown>

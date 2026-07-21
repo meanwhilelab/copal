@@ -184,6 +184,26 @@ export const links = pgTable(
   ],
 );
 
+// Public shareable item links (`/s/<token>`). One ACTIVE share per item —
+// enforced by a partial unique index on itemId WHERE revoked_at IS NULL, so a
+// revoke + re-share simply inserts a new row rather than reusing/mutating the
+// old one (the old token stays permanently dead). The plaintext token is
+// never stored — only its hash, like api_clients/auth.
+export const itemShares = pgTable(
+  "item_shares",
+  {
+    id: id(),
+    itemId: uuid("item_id").notNull().references(() => items.id),
+    tokenHash: text("token_hash").notNull().unique(),
+    createdByClientId: uuid("created_by_client_id").references(() => apiClients.id),
+    createdAt: createdAt(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("item_shares_active_uq").on(t.itemId).where(sql`${t.revokedAt} IS NULL`),
+  ],
+);
+
 export const idempotencyKeys = pgTable(
   "idempotency_keys",
   {

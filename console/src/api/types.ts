@@ -176,6 +176,27 @@ export type Vitals = {
   wal_archived_age_seconds: number | null;
 };
 
+export type ShareStatus = { active: boolean; created_at?: string };
+export type CreateShareResult =
+  | { existing: true; created_at: string }
+  | { existing: false; token: string; created_at: string };
+
+/** The restricted public view served at `/s/<token>` — identity, description
+ *  and compiled context only, never connections/resonances/ids. */
+export type PublicItem = {
+  name: string;
+  board: string | null;
+  status: string;
+  lane: string | null;
+  priority: string | null;
+  progress: number;
+  due_date: string | null;
+  description: string | null;
+  context: string | null;
+  context_compiled_at: string | null;
+  sunk: boolean;
+};
+
 /** Strip the provenance envelope for display; the console renders its own "machine" chrome. */
 export function stripLabel(text: string | null): string {
   if (!text) return "";
