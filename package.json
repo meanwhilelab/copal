@@ -1,6 +1,6 @@
 {
   "name": "copal",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Copal — personal knowledge hub (MCP server + API core)",
   "main": "index.js",
   "scripts": {

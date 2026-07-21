@@ -31,7 +31,7 @@ function parseModelChain(
 export const config = {
   port: Number(process.env.PORT ?? 8787),
   host: process.env.HOST ?? "0.0.0.0",
-  version: "0.1.0",
+  version: "0.1.1",
   rateLimit: {
     max: Number(process.env.RATE_LIMIT_MAX ?? 120),
     windowMs: 60_000,
