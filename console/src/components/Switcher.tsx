@@ -18,17 +18,17 @@ export function Switcher({
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
         <button
-          className="flex items-center gap-2 h-[34px] px-3 rounded-[9px] border cursor-pointer text-[0.7813rem]"
+          className="flex items-center gap-2 h-[34px] px-3 rounded-[9px] border cursor-pointer text-[0.7813rem] max-w-full min-w-0"
           style={{ borderColor: "var(--line)", background: "var(--ground)", color: "var(--text-2)" }}
         >
-          <span className="mono text-[0.625rem] uppercase tracking-wider" style={{ color: "var(--amber)" }}>
+          <span className="mono text-[0.625rem] uppercase tracking-wider flex-none max-w-[70px] md:max-w-none truncate" style={{ color: "var(--amber)" }}>
             {currentWs}
           </span>
-          <span style={{ color: "var(--text-3)" }}>/</span>
-          <span className="font-semibold" style={{ color: "var(--text)" }}>
+          <span className="flex-none" style={{ color: "var(--text-3)" }}>/</span>
+          <span className="font-semibold min-w-0 max-w-[130px] md:max-w-none truncate" style={{ color: "var(--text)" }}>
             {activeBoard?.name ?? "no board"}
           </span>
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" className="flex-none">
             <path d="M6 9l6 6 6-6" />
           </svg>
         </button>

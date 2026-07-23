@@ -66,7 +66,7 @@ export function ExploreView() {
   const searchCards = (search.data?.results ?? []).filter((r) => ["idea", "item", "session", "content"].includes(r.type));
 
   return (
-    <div className="px-[26px] pt-[22px] pb-[60px]">
+    <div className="px-4 md:px-[26px] pt-[22px] pb-[60px]">
       <h1 className="display m-0 font-medium text-[1.875rem] tracking-wide">Explore</h1>
       <p className="mt-1 mb-5 text-[0.7813rem]" style={{ color: "var(--text-3)" }}>
         Your material — everything captured and how it connects. Open anything, then follow the threads.
@@ -82,7 +82,7 @@ export function ExploreView() {
 
       {isSearching ? (
         searchCards.length > 0 ? (
-          <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))" }}>
+          <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(min(100%,300px),1fr))" }}>
             {searchCards.map((r) => (
               <Card key={`${r.type}-${r.id}`} type={r.type} title={r.title} snippet={stripLabel(r.snippet).replace(/<\/?b>/g, "")} sunk={r.sunk} onClick={() => open(r.type, r.id)} />
             ))}
@@ -93,7 +93,7 @@ export function ExploreView() {
       ) : (
         <>
           <h2 className="kicker mb-3">Recent</h2>
-          <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))" }}>
+          <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(min(100%,300px),1fr))" }}>
             {(captures.data?.captures ?? []).map((c) => (
               <Card
                 key={`${c.type}-${c.id}`}

@@ -482,8 +482,8 @@ export function ObjectView({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-none px-6 pt-5 pb-4 border-b" style={{ borderColor: "var(--line)" }}>
-        <div className="flex items-center gap-2.5 mb-2">
+      <div className="flex-none px-4 md:px-6 pt-5 pb-4 border-b" style={{ borderColor: "var(--line)" }}>
+        <div className="flex items-center flex-wrap gap-2.5 mb-2">
           <TypeBadge type={d.type} />
           {d.sunk && <span className="mono text-[0.625rem]" style={{ color: "var(--amber)" }}>↓ sunk</span>}
           {d.sunk && (
@@ -516,7 +516,7 @@ export function ObjectView({
         )}
       </div>
 
-      <div className="flex-1 overflow-auto px-6 py-5">
+      <div className="flex-1 overflow-auto px-4 md:px-6 py-5">
         {d.type === "item" ? (
           <ItemDescription d={d} />
         ) : d.body ? (
@@ -605,7 +605,7 @@ export function ObjectView({
       </div>
 
       {d.redactable && (
-        <div className="flex-none px-6 py-3 border-t" style={{ borderColor: "var(--line)", background: "var(--ground-2)" }}>
+        <div className="flex-none px-4 md:px-6 py-3 border-t" style={{ borderColor: "var(--line)", background: "var(--ground-2)" }}>
           {confirmRedact === "arm" ? (
             <div className="flex items-center gap-2">
               <input

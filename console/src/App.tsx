@@ -67,7 +67,7 @@ function ObjectScreen() {
   if (!type || !id) return <Navigate to="/" replace />;
   return (
     <div className="h-full flex flex-col">
-      <div className="flex-none flex items-center gap-2 px-[26px] py-2.5 border-b" style={{ borderColor: "var(--line)" }}>
+      <div className="flex-none flex items-center gap-2 px-4 md:px-[26px] py-2.5 border-b" style={{ borderColor: "var(--line)" }}>
         <button
           onClick={() => (window.history.length > 1 ? navigate(-1) : navigate("/explore"))}
           className="text-[0.7813rem] cursor-pointer bg-transparent border-0"
@@ -173,10 +173,10 @@ function Shell() {
   return (
     <div className="h-screen flex flex-col overflow-hidden" style={{ background: "var(--ground)" }}>
       <header
-        className="flex-none h-14 flex items-center gap-5 px-5 border-b"
+        className="flex-none flex flex-wrap md:flex-nowrap items-center gap-2 md:gap-5 px-3 md:px-5 py-2 md:py-0 md:h-14 border-b"
         style={{ borderColor: "var(--line)", background: "linear-gradient(180deg,var(--surface),var(--ground-2))" }}
       >
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2 md:gap-2.5 flex-none">
           <img src="/favicon.svg" alt="" className="h-7 w-7 rounded-[6px]" />
           <span className="display text-[1.375rem] font-semibold tracking-wide" style={{ color: "var(--amber-hi)" }}>
             Copal
@@ -186,12 +186,12 @@ function Shell() {
 
         <button
           onClick={() => setSearchOpen(true)}
-          className="flex-1 max-w-[520px] flex items-center gap-2.5 h-[34px] px-3 rounded-[9px] border cursor-text text-left"
+          className="flex-1 min-w-0 md:max-w-[520px] flex items-center gap-2.5 h-[34px] px-3 rounded-[9px] border cursor-text text-left"
           style={{ borderColor: "var(--line)", background: "var(--ground)", color: "var(--text-3)" }}
         >
           <SearchIcon />
-          <span className="flex-1 truncate">Search everywhere — boards, ideas, sessions, contents…</span>
-          <span className="mono text-[0.6875rem] px-1.5 py-px rounded border" style={{ borderColor: "var(--line)" }}>
+          <span className="flex-1 min-w-0 truncate">Search everywhere — boards, ideas, sessions, contents…</span>
+          <span className="mono text-[0.6875rem] px-1.5 py-px rounded border flex-none" style={{ borderColor: "var(--line)" }}>
             ⌘K
           </span>
         </button>
@@ -259,7 +259,7 @@ function Shell() {
       </div>
 
       <footer
-        className="flex-none h-[34px] flex items-center gap-6 px-5 border-t mono text-[0.6563rem] tracking-wide"
+        className="flex-none flex flex-wrap items-center gap-x-4 gap-y-1 md:gap-x-6 px-3 md:px-5 py-1.5 md:py-0 md:h-[34px] border-t mono text-[0.6563rem] tracking-wide"
         style={{ borderColor: "var(--line)", background: "var(--ground-2)", color: "var(--text-3)" }}
       >
         <span className="flex items-center gap-1.5">

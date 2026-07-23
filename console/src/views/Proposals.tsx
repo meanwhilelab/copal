@@ -11,7 +11,7 @@ const KIND: Record<Proposal["kind"], { label: string; color: string; verb: strin
 
 function EndpointCell({ type, title, sunk }: { type: string; title: string | null; sunk: boolean }) {
   return (
-    <div className="flex-1 rounded-lg border p-2.5" style={{ borderColor: "var(--line)", background: "var(--ground)" }}>
+    <div className="flex-1 min-w-0 rounded-lg border p-2.5" style={{ borderColor: "var(--line)", background: "var(--ground)" }}>
       <div className="flex items-center gap-1.5 mb-1">
         <div className="kicker text-[0.5313rem]">{type}</div>
         {sunk && (
@@ -113,7 +113,7 @@ export function ProposalsView() {
   const sunk = list.filter((p) => p.from_sunk || p.to_sunk);
 
   return (
-    <div className="px-[26px] pt-[22px] pb-[60px]">
+    <div className="px-4 md:px-[26px] pt-[22px] pb-[60px]">
       <h1 className="display m-0 font-medium text-[1.875rem] tracking-wide">Proposals</h1>
       <p className="mt-1 mb-6 text-[0.7813rem]" style={{ color: "var(--text-3)" }}>
         Discovered connections the Librarian noticed overnight — advisory, never facts until you accept.
@@ -138,7 +138,7 @@ export function ProposalsView() {
         </div>
       ) : (
         <>
-          <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(360px,1fr))" }}>
+          <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(min(100%,360px),1fr))" }}>
             {live.map((p) => (
               <ProposalCard key={p.id} p={p} />
             ))}
@@ -153,7 +153,7 @@ export function ProposalsView() {
                   {sunk.length}
                 </span>
               </div>
-              <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(360px,1fr))" }}>
+              <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(min(100%,360px),1fr))" }}>
                 {sunk.map((p) => (
                   <ProposalCard key={p.id} p={p} sunk />
                 ))}

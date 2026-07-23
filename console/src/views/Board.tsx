@@ -86,7 +86,10 @@ function LinkCountBadge({ item, ctx }: { item: Item; ctx: Ctx }) {
       .join(" · ") + (item.sunkLinkCount ? ` · ${item.sunkLinkCount} in the material` : "");
   return (
     <button
-      onClick={() => ctx.onOpenObject("item", item.id)}
+      onClick={(e) => {
+        e.stopPropagation();
+        ctx.onOpenObject("item", item.id);
+      }}
       title={breakdown}
       className="flex-none text-[0.7rem] leading-none rounded-full px-1.5 py-[3px] border-0 cursor-pointer"
       style={{ border: "1px solid var(--line)", color: "var(--text-2)", background: "transparent" }}
@@ -693,7 +696,7 @@ function ComposerRow({
   };
   return (
     <div
-      className="grid items-center px-3 min-h-[46px] rounded-[9px] border risein"
+      className="flex flex-col gap-2 px-3 py-2.5 md:grid md:items-center md:gap-0 md:py-0 md:min-h-[46px] rounded-[9px] border risein"
       style={{ gridTemplateColumns: GRID, borderColor: "var(--amber)", background: "var(--surface)" }}
     >
       <input
@@ -705,13 +708,13 @@ function ComposerRow({
           if (e.key === "Enter") commit();
           if (e.key === "Escape") setOpen(false);
         }}
-        className="text-[0.8438rem] bg-transparent border-0 outline-none"
-        style={{ color: "var(--text)" }}
+        className="text-[0.8438rem] bg-transparent border-0 outline-none w-full rounded-md md:rounded-none border md:border-0 px-2 py-1.5 md:px-0 md:py-0"
+        style={{ color: "var(--text)", borderColor: "var(--line)" }}
       />
       <select
         value={lane ?? ""}
         onChange={(e) => setLane(e.target.value || undefined)}
-        className="text-[0.7188rem] rounded-md border px-1.5 py-1 max-w-[130px]"
+        className="text-[0.7188rem] rounded-md border px-1.5 py-1 w-full md:w-auto md:max-w-[130px]"
         style={{ background: "var(--ground)", borderColor: "var(--line)", color: "var(--text-2)" }}
       >
         <option value="">no lane</option>
@@ -721,7 +724,7 @@ function ComposerRow({
           </option>
         ))}
       </select>
-      <div className="col-span-5" />
+      <div className="hidden md:block md:col-span-5" />
       <div className="flex justify-end">
         <button
           onClick={commit}
@@ -791,6 +794,91 @@ function DraggableRow({ row, ctx, settleId }: { row: Row<Item>; ctx: Ctx; settle
   );
 }
 
+// Phone-width stand-in for DraggableRow: a stacked, tappable card instead of a
+// grid row — no drag handle, no inline-editable cells. The whole card opens
+// the item's full leaf page; editing happens there.
+function MobileItemCard({ item, ctx }: { item: Item; ctx: Ctx }) {
+  const lane = item.lane ? ctx.laneMap.get(item.lane) : undefined;
+  const entry = ctx.statusMap.get(item.status);
+  const color = entry?.color ?? "var(--st-neutral)";
+  const done = !!ctx.statusMap.get(item.status)?.terminal;
+  const pri = item.priority;
+  const showPriority = !!pri && pri !== "media" && pri !== "normale";
+  const open = () => ctx.onOpenObject("item", item.id);
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={open}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          open();
+        }
+      }}
+      className={`px-3 py-2.5 border-b cursor-pointer active:bg-(--surface-hi) ${item.sunkAt ? "sunk-row" : ""} ${
+        ctx.settleId === item.id ? "settle" : ""
+      }`}
+      style={{ borderColor: "var(--line)" }}
+    >
+      <div className="flex items-start gap-2">
+        {item.sunkAt && (
+          <span
+            title="inclusion — sunk"
+            className="flex-none mt-0.5 w-4 h-4 rounded grid place-items-center border"
+            style={{ background: "var(--sunk-tint)", borderColor: "var(--line)" }}
+          >
+            <SinkGlyph size={9} />
+          </span>
+        )}
+        <div
+          className="flex-1 min-w-0 text-[0.8438rem] leading-snug line-clamp-2"
+          style={{
+            color: done ? "var(--text-3)" : "var(--text)",
+            textDecoration: done ? "line-through" : undefined,
+            textDecorationColor: "var(--line-2)",
+          }}
+        >
+          {item.name}
+        </div>
+        <LinkCountBadge item={item} ctx={ctx} />
+      </div>
+      <div className="flex items-center flex-wrap gap-1.5 mt-2">
+        <span
+          title={entry?.label ?? item.status}
+          className="w-[9px] h-[9px] rounded-full flex-none"
+          style={{ background: color, boxShadow: `0 0 8px -2px ${color}` }}
+        />
+        {lane && (
+          <span
+            className="inline-flex items-center gap-1.5 px-2 py-[3px] rounded-full text-[0.6875rem] font-semibold"
+            style={{
+              color: lane.color ?? "var(--amber)",
+              background: `color-mix(in srgb, ${lane.color ?? "var(--amber)"} 14%, transparent)`,
+            }}
+          >
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: lane.color ?? "var(--amber)" }} />
+            {lane.label}
+          </span>
+        )}
+        {showPriority && (
+          <span
+            className="text-[0.75rem]"
+            style={{ color: pri === "alta" ? "var(--pri-alta)" : "var(--text-3)", fontWeight: pri === "alta" ? 600 : 400 }}
+          >
+            {PRIORITY_LABEL[pri!] ?? pri}
+          </span>
+        )}
+        {item.dueDate && (
+          <span className="text-[0.75rem]" style={{ color: dueSoon(item.dueDate) ? "var(--amber)" : "var(--text-2)" }}>
+            {fmtDue(item.dueDate)}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // A status group that is also a drop zone. Dropping a row here changes its status.
 function StatusGroup({
   st,
@@ -833,9 +921,16 @@ function StatusGroup({
         {st.terminal ? <span className="kicker" style={{ color: "var(--st-done)" }}>terminal</span> : null}
       </div>
 
-      {rows.map((row) => (
-        <DraggableRow key={row.id} row={row} ctx={ctx} settleId={settleId} />
-      ))}
+      <div className="hidden md:block">
+        {rows.map((row) => (
+          <DraggableRow key={row.id} row={row} ctx={ctx} settleId={settleId} />
+        ))}
+      </div>
+      <div className="md:hidden">
+        {rows.map((row) => (
+          <MobileItemCard key={row.id} item={row.original} ctx={ctx} />
+        ))}
+      </div>
 
       {!st.terminal && <ComposerRow board={board} statusKey={st.key} />}
       {rows.length === 0 && (st.terminal || isOver) ? (
@@ -1010,8 +1105,8 @@ export function BoardView({
   }
 
   return (
-    <div className="px-[26px] pt-[22px] pb-[60px]">
-      <div className="flex items-end justify-between mb-5 gap-5 flex-wrap">
+    <div className="px-4 md:px-[26px] pt-[22px] pb-[60px]">
+      <div className="flex items-end justify-between mb-5 gap-3 md:gap-5 flex-wrap">
         <div>
           <div className="flex items-center gap-2.5">
             <BoardTitle board={board} />
@@ -1056,7 +1151,7 @@ export function BoardView({
         style={{ background: "var(--surface)", borderColor: "var(--line)" }}
       >
         <div
-          className="grid px-3 py-2.5 text-[0.625rem] uppercase font-semibold tracking-[0.08em] border-b"
+          className="hidden md:grid px-3 py-2.5 text-[0.625rem] uppercase font-semibold tracking-[0.08em] border-b"
           style={{ gridTemplateColumns: GRID, background: "var(--ground-2)", borderColor: "var(--line-2)", color: "var(--text-3)" }}
         >
           <span>Item</span>
