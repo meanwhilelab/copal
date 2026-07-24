@@ -239,11 +239,12 @@ export function LaneCell({ item, ctx }: { item: Item; ctx: Ctx }) {
       <Popover.Trigger asChild>
         {lane ? (
           <button
-            className="inline-flex items-center gap-1.5 px-2 py-[3px] rounded-full text-[0.6875rem] font-semibold border cursor-pointer"
+            title={lane.label}
+            className="inline-flex items-center gap-1.5 max-w-full min-w-0 px-2 py-[3px] rounded-full text-[0.6875rem] font-semibold border cursor-pointer"
             style={{ color: c, background: `color-mix(in srgb, ${c} 14%, transparent)`, borderColor: `color-mix(in srgb, ${c} 34%, transparent)` }}
           >
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: c }} />
-            {lane.label}
+            <span className="flex-none w-1.5 h-1.5 rounded-full" style={{ background: c }} />
+            <span className="truncate">{lane.label}</span>
           </button>
         ) : (
           <button className="text-[0.6875rem] px-1.5 py-[3px] rounded-md cursor-pointer border border-transparent hover:border-(--line)" style={{ color: "var(--text-3)" }}>
