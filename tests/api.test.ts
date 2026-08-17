@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db, pool } from "../src/db/client.js";
 import { apiClients, boards, idempotencyKeys, items, workspaces } from "../src/db/schema.js";
 import { authenticate, generateToken, hashToken } from "../src/core/auth.js";
 import { withIdempotency } from "../src/core/idempotency.js";
-import { updateItem, VersionConflictError } from "../src/core/items.js";
+import { createItem, updateItem, VersionConflictError } from "../src/core/items.js";
 import { buildApp } from "../src/rest/server.js";
 
 const suffix = randomUUID().slice(0, 8);
@@ -181,5 +181,70 @@ describe("idempotency + optimistic concurrency", () => {
 
     await db.delete(items).where(eq(items.id, item!.id));
     await db.delete(boards).where(eq(boards.id, board!.id));
+  });
+});
+
+describe("POST /api/v1/items/:id/linear", () => {
+  let linearBoardId: string;
+
+  beforeAll(async () => {
+    const ws = await db.query.workspaces.findFirst({ where: eq(workspaces.slug, "personal") });
+    const [b] = await db
+      .insert(boards)
+      .values({
+        workspaceId: ws!.id,
+        name: `api-linear-${suffix}`,
+        statusSet: [{ key: "todo", label: "Todo" }],
+        laneSet: [],
+      })
+      .returning();
+    linearBoardId = b!.id;
+  });
+
+  afterAll(async () => {
+    await db.execute(sql`DELETE FROM links WHERE from_id IN (SELECT id FROM items WHERE board_id=${linearBoardId}::uuid)`);
+    await db.execute(sql`DELETE FROM jobs WHERE subject_id IN (SELECT id FROM items WHERE board_id=${linearBoardId}::uuid)`);
+    await db.execute(sql`DELETE FROM jobs WHERE subject_id IN (SELECT id FROM contents WHERE source_type='linear' AND source_url LIKE 'https://linear.app/acme/issue/NAT-5%')`);
+    await db.execute(sql`DELETE FROM contents WHERE source_type='linear' AND source_url LIKE 'https://linear.app/acme/issue/NAT-5%'`);
+    await db.execute(sql`DELETE FROM items WHERE board_id=${linearBoardId}::uuid`);
+    await db.execute(sql`DELETE FROM boards WHERE id=${linearBoardId}::uuid`);
+  });
+
+  it("tracks the issue and returns the content and link", async () => {
+    const item = await createItem(db, linearBoardId, { name: "rest-linear" });
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/items/${item.id}/linear`,
+      headers: { authorization: `Bearer ${validToken}` },
+      payload: { url: "https://linear.app/acme/issue/NAT-500/some-slug" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.content.sourceType).toBe("linear");
+    expect(body.content.sourceUrl).toBe("https://linear.app/acme/issue/NAT-500");
+    expect(body.link.linkType).toBe("tracks");
+  });
+
+  it("rejects a non-Linear URL with 400", async () => {
+    const item = await createItem(db, linearBoardId, { name: "rest-linear-bad" });
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/items/${item.id}/linear`,
+      headers: { authorization: `Bearer ${validToken}` },
+      payload: { url: "https://example.com/nope" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("requires a url", async () => {
+    const item = await createItem(db, linearBoardId, { name: "rest-linear-nourl" });
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/items/${item.id}/linear`,
+      headers: { authorization: `Bearer ${validToken}` },
+      payload: {},
+    });
+    expect(res.statusCode).toBe(400);
   });
 });

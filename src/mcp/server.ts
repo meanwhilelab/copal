@@ -9,6 +9,7 @@ import { getContext, type Anchor } from "../core/context.js";
 import { promoteIdea, saveIdea, touchIdea } from "../core/ideas.js";
 import { withIdempotency } from "../core/idempotency.js";
 import { createItem, updateItem, VersionConflictError, BoardSetValidationError } from "../core/items.js";
+import { attachLinearIssue } from "../core/linear-issues.js";
 import { linkItems, sinkEntity, type EntityType } from "../core/links.js";
 import { getObject, type ObjectType } from "../core/objects.js";
 import { embeddingProviderFromEnv } from "../core/embeddings.js";
@@ -322,6 +323,29 @@ export function buildMcpServer(db: Db, client: AuthedClient): McpServer {
         note: args.note as string | undefined,
         createdByClientId: client.id,
       }, client),
+    ),
+  );
+
+  server.registerTool(
+    "link_linear_issue",
+    {
+      description:
+        "Track a Linear issue from a board item. Any number of issues per item; each becomes a linked object whose " +
+        "sub-issue tree is folded into the item's compiled context and refreshed automatically. Idempotent — " +
+        "tracking the same issue twice returns the existing object and edge." +
+        CONTRACT,
+      inputSchema: {
+        item_id: z.string().uuid(),
+        url: z.string().min(1),
+      },
+    },
+    guarded(true, (args) =>
+      attachLinearIssue(
+        db,
+        client,
+        { itemId: args.item_id as string, url: args.url as string },
+        config.capture.linear.apiKey ?? null,
+      ),
     ),
   );
 
