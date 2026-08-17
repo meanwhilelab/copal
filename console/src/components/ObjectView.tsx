@@ -11,6 +11,7 @@ import {
   useSearch,
   useShareStatus,
   useSink,
+  useTrackLinearIssue,
   useUnlink,
   useUnsink,
   useUpdateItem,
@@ -55,10 +56,19 @@ const SunkChip = () => (
   </span>
 );
 
+/** Same shape core/linear.ts accepts — a Linear issue URL, slug optional. */
+const LINEAR_ISSUE_URL_RE = /^https?:\/\/linear\.app\/[^/]+\/issue\/[A-Za-z][A-Za-z0-9]*-\d+(?:[/?].*)?$/i;
+const linearIdentifier = (url: string) => url.match(/\/issue\/([A-Za-z][A-Za-z0-9]*-\d+)/)?.[1] ?? null;
+
 function LinkPicker({ obj, onDone }: { obj: ObjectDetail; onDone: () => void }) {
   const [q, setQ] = useState("");
   const results = useSearch(q);
   const link = useLink();
+  // Pasting a Linear issue URL tracks it rather than searching for it — the
+  // issue may not exist as an object here yet, which is the whole point.
+  const track = useTrackLinearIssue();
+  const trimmed = q.trim();
+  const issueId = obj.type === "item" && LINEAR_ISSUE_URL_RE.test(trimmed) ? linearIdentifier(trimmed) : null;
   const existing = new Set(obj.connections.map((c) => `${c.type}:${c.id}`).concat(`${obj.type}:${obj.id}`));
   return (
     <div className="rounded-[10px] border p-2 mb-3" style={{ borderColor: "var(--amber)", background: "var(--ground)" }}>
@@ -66,11 +76,34 @@ function LinkPicker({ obj, onDone }: { obj: ObjectDetail; onDone: () => void }) 
         autoFocus
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Search for something to connect…"
+        placeholder="Search for something to connect — or paste a Linear issue URL…"
         className="w-full text-[0.7813rem] rounded-md px-2 py-1.5 outline-none border mb-1.5"
         style={{ background: "var(--surface)", borderColor: "var(--line)", color: "var(--text)" }}
       />
       <div className="max-h-[180px] overflow-auto flex flex-col gap-1">
+        {issueId && (
+          <button
+            onClick={() =>
+              track.mutate(
+                { itemId: obj.id, url: trimmed },
+                {
+                  onSuccess: () => {
+                    toast(`Tracking ${issueId}.`);
+                    onDone();
+                  },
+                  onError: (e) => toast.error(e.message),
+                },
+              )
+            }
+            disabled={track.isPending}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left cursor-pointer border-0 bg-transparent hover:bg-(--surface-hi)"
+          >
+            <TypeBadge type="content" />
+            <span className="flex-1 min-w-0 text-[0.75rem] truncate" style={{ color: "var(--text-2)" }}>
+              Track {issueId}
+            </span>
+          </button>
+        )}
         {(results.data?.results ?? [])
           .filter((r) => !existing.has(`${r.type}:${r.id}`) && (r.type === "idea" || r.type === "item" || r.type === "session" || r.type === "content"))
           .slice(0, 8)
@@ -96,7 +129,7 @@ function LinkPicker({ obj, onDone }: { obj: ObjectDetail; onDone: () => void }) 
               <span className="flex-1 min-w-0 text-[0.75rem] truncate" style={{ color: "var(--text-2)" }}>{r.title}</span>
             </button>
           ))}
-        {q.trim().length > 1 && (results.data?.results.length ?? 0) === 0 && (
+        {!issueId && trimmed.length > 1 && (results.data?.results.length ?? 0) === 0 && (
           <div className="text-[0.6875rem] text-center py-2" style={{ color: "var(--text-3)" }}>Nothing found.</div>
         )}
       </div>
