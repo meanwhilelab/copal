@@ -47,8 +47,8 @@ echo "== start scratch cluster =="
 sudo -u postgres "$BIN/pg_ctl" -D "$DRILL" -t 180 -w \
   -o "-p $PORT -k /tmp -c listen_addresses='' -c archive_mode=off" start
 
-echo "== verify amber data =="
-sudo -u postgres psql -p "$PORT" -h /tmp -d amber -Atc \
+echo "== verify copal data =="
+sudo -u postgres psql -p "$PORT" -h /tmp -d copal -Atc \
   "SELECT 'boards: ' || count(*) FROM boards;" -Atc \
   "SELECT 'items: ' || count(*) FROM items;" -Atc \
   "SELECT 'ideas: ' || count(*) FROM ideas;" -Atc \

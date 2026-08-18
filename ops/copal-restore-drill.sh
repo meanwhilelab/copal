@@ -30,7 +30,7 @@ sudo -u postgres "$BIN/pg_ctl" -D "$DRILL" -t 120 -w \
   -o "-p 5434 -k /tmp -c listen_addresses='' -c archive_mode=off" start
 
 echo "== verify =="
-sudo -u postgres psql -p 5434 -h /tmp -d amber -Atc \
+sudo -u postgres psql -p 5434 -h /tmp -d copal -Atc \
   "SELECT 'boards: ' || count(*) FROM boards;" -Atc \
   "SELECT 'items: ' || count(*) FROM items;" -Atc \
   "SELECT 'wal-replayed marker: ' || count(*) FROM ideas WHERE title = 'PITR-drill-marker';"

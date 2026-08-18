@@ -37,7 +37,7 @@ CLIENTS — each brings its own three layers; all outside the core
          │
          │ HTTPS via reverse proxy · bearer token per client
          ▼
- ┌─ AMBER CORE (VPS, docker-compose) ─────────────────────┐
+ ┌─ COPAL CORE (VPS, docker-compose) ─────────────────────┐
  │ MCP server + REST mirror → one service layer           │
  │ PostgreSQL — localhost only; tsvector (pgvector ph.2)  │
  │ Housekeeper — async AI enrichment, one call, no loop   │

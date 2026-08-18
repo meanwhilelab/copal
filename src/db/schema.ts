@@ -220,8 +220,8 @@ export const idempotencyKeys = pgTable(
 
 // Semantic embeddings (phase 2). One current vector per corpus entity, upserted
 // on re-embed. `vector` is NOT a trusted extension — CREATE EXTENSION vector runs
-// out-of-band as the postgres superuser (ops/amber-pgvector-setup.sh), never in a
-// drizzle migration (which runs as the amber role).
+// out-of-band as the postgres superuser (ops/copal-pgvector-setup.sh), never in a
+// drizzle migration (which runs as the copal role).
 export const embeddings = pgTable(
   "embeddings",
   {

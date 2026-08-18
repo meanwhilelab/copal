@@ -21,6 +21,12 @@ COPY --from=build /app/dist ./dist
 COPY --from=console /console/dist ./console/dist
 COPY drizzle ./drizzle
 COPY package.json ./
+# node:22-alpine bundles an npm whose own dependencies carry CVE-2026-59873
+# (tar, CRITICAL) plus HIGHs in undici and brace-expansion. They live under
+# /usr/local/lib/node_modules/npm/, not in this app's tree, so a rebuild
+# reproduces them — only upgrading npm clears them. Must precede USER node,
+# since a global install needs root.
+RUN npm i -g npm@latest && npm cache clean --force
 # Drop privileges: the runtime never needs root (the `node` user ships in the image).
 USER node
 # Liveness for the orchestrator (compose healthcheck consumes /healthz).
