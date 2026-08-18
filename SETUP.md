@@ -27,7 +27,8 @@ Edit `.env`. The essentials:
     capture still stores everything; summaries/embeddings just wait until a key
     is set.
 - `OPENAI_API_KEY=…` — enables semantic search + resonance (embeddings). Optional.
-- `LINEAR_API_KEY=…` — enables Linear issue enrichment in item context compiles. Optional.
+- `LINEAR_API_KEY=…` — lets a board item track any number of Linear issues, each
+  refreshed with its sub-issue tree on every item context compile. Optional.
 - `HOUSEKEEPER_DAILY_CAP_EUR` — a hard daily spend cap for AI calls (default 1.0).
 
 `.env` never leaves your machine — it is gitignored.
@@ -83,10 +84,32 @@ it gates break-glass redaction and dead-job requeue).
 - `GET /status` — deep check (WAL archiving, worker liveness, spend, queues) as
   200/503 for an external monitor.
 
+## Running the tests
+
+```bash
+npm test
+```
+
+**The suite is destructive.** It runs against whatever `DATABASE_URL` points at
+and clears shared tables (`jobs`, `llm_usage`) as part of its setup, so never
+point it at a database you care about. Use a throwaway one:
+
+```bash
+docker compose -f docker-compose.dev.yml up -d db      # pgvector on :5433
+psql "postgres://copal:copal@127.0.0.1:5433/copal" -c "CREATE EXTENSION IF NOT EXISTS vector;"
+export DATABASE_URL="postgres://copal:copal@127.0.0.1:5433/copal"
+npm run db:migrate && npm run db:seed && npm test
+```
+
+The seed matters: tests look up the `personal` workspace.
+
 ## Notes
 
-- **Migrations auto-apply on container start** if you deploy with Docker, so a
-  redeploy always brings the schema up to date.
+- **Migrations auto-apply on container start** if you deploy with Docker (the
+  image's `CMD` runs the migrator before the server), so a redeploy always
+  brings the schema up to date. To run them by hand against a deployed
+  instance, use `node dist/db/migrate.js` — the `npm run db:migrate` script
+  needs `tsx`, which the production image prunes.
 - Keep production settings (external reverse-proxy network, native Postgres,
   backups) in a local `docker-compose.override.yml` and your `.env` — neither is
   committed.

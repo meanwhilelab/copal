@@ -1,6 +1,12 @@
 # Local development database only — production uses your own Postgres.
 # pgvector/pgvector:pg16 = Postgres 16 with the pgvector extension preinstalled
 # (prod installs postgresql-16-pgvector via ops/copal-pgvector-setup.sh).
+#
+# Its own compose project: without this both files default to the directory
+# name, so `docker compose ... --remove-orphans` in either direction would
+# delete the other's container.
+name: copal-dev
+
 services:
   db:
     image: pgvector/pgvector:pg16
