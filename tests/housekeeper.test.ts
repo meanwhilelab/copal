@@ -7,6 +7,7 @@ import { generateToken, hashToken, type AuthedClient } from "../src/core/auth.js
 import { getContext } from "../src/core/context.js";
 import { saveContent } from "../src/core/contents.js";
 import { housekeeperTick, todaysCostMicros } from "../src/core/housekeeper.js";
+import { attachLinearIssue } from "../src/core/linear-issues.js";
 import { saveIdea } from "../src/core/ideas.js";
 import type { LlmInput, LlmProvider } from "../src/core/llm.js";
 import { saveSession } from "../src/core/sessions.js";
@@ -274,115 +275,106 @@ describe("item_context", () => {
     expect(fresh!.context).toBeNull();
   });
 
-  describe("linear enrichment", () => {
-    afterEach(() => {
-      vi.unstubAllGlobals();
-    });
-
-    it("includes the live Linear issue's title in the compiled prompt when the item's link is a Linear issue", async () => {
+  describe("tracked Linear issues", () => {
+    it("feeds every tracked issue to the Librarian, sub-issues included", async () => {
       const [item] = await db
         .insert(items)
         .values({
           boardId,
-          name: `hk-item-linear-${suffix}`,
+          name: `hk-item-tracked-${suffix}`,
           status: "todo",
           description: "Track the payments migration",
-          link: "https://linear.app/meanwhile/issue/NAT-2061/ship-the-migration",
         })
         .returning();
-      await db.execute(sql`INSERT INTO jobs (kind, subject_id, payload) VALUES
-        ('item_context', ${item!.id}::uuid, ${JSON.stringify({ item_id: item!.id })}::jsonb)`);
 
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async () => ({
+      const gqlFor = (identifier: string, title: string, child?: string): typeof fetch =>
+        (async () => ({
           ok: true,
           json: async () => ({
             data: {
               issue: {
-                identifier: "NAT-2061",
-                title: "Ship the payments migration to prod",
-                description: "Cut over the last tenant.",
-                updatedAt: "2026-07-10T00:00:00.000Z",
+                identifier,
+                title,
+                description: `${identifier} body.`,
+                updatedAt: "2026-08-10T00:00:00.000Z",
                 state: { name: "In Progress" },
-                children: {
-                  nodes: [
-                    {
-                      identifier: "NAT-2070",
-                      title: "Backfill the ledger snapshots",
-                      description: "Sub-issue detail.",
-                      updatedAt: "2026-07-11T00:00:00.000Z",
-                      state: { name: "Todo" },
-                    },
-                  ],
-                },
+                children: child
+                  ? {
+                      nodes: [
+                        {
+                          identifier: child,
+                          title: `Sub ${child}`,
+                          description: null,
+                          updatedAt: "2026-08-11T00:00:00.000Z",
+                          state: { name: "Todo" },
+                          children: { nodes: [] },
+                        },
+                      ],
+                    }
+                  : { nodes: [] },
               },
             },
           }),
-        })),
+        })) as unknown as typeof fetch;
+
+      await attachLinearIssue(
+        db,
+        writer,
+        { itemId: item!.id, url: "https://linear.app/meanwhile/issue/NAT-100" },
+        "test-linear-key",
+        gqlFor("NAT-100", "Ship the payments migration", "NAT-101"),
+      );
+      await attachLinearIssue(
+        db,
+        writer,
+        { itemId: item!.id, url: "https://linear.app/meanwhile/issue/NAT-200" },
+        "test-linear-key",
+        gqlFor("NAT-200", "Backfill the ledger snapshots"),
       );
 
-      let sawTitle = false;
-      let sawSubIssue = false;
+      let seen = "";
       const provider = fakeProvider((input) => {
-        if (input.user.includes("Ship the payments migration to prod")) sawTitle = true;
-        if (input.user.includes("Backfill the ledger snapshots")) sawSubIssue = true;
-        return "Synthesis referencing the live Linear issue.";
+        seen = input.user;
+        return "Synthesis over both tracked issues.";
       });
-      await housekeeperTick(db, provider, null, "test-linear-key");
-      expect(sawTitle).toBe(true);
-      expect(sawSubIssue).toBe(true);
+      // No key on the tick: the cached snapshots alone must carry the compile.
+      await housekeeperTick(db, provider, null, null);
+
+      expect(seen).toContain("NAT-100 — Ship the payments migration");
+      expect(seen).toContain("NAT-100 body.");
+      expect(seen).toContain("NAT-101");
+      expect(seen).toContain("NAT-200 — Backfill the ledger snapshots");
 
       const fresh = await db.query.items.findFirst({ where: eq(items.id, item!.id) });
-      expect(fresh!.context).not.toBeNull();
+      expect(fresh!.context).toBe("Synthesis over both tracked issues.");
     });
 
-    it("degrades silently to today's behavior when the Linear fetch fails", async () => {
-      const { idea } = await saveIdea(db, writer, {
-        workspaceId: wsId,
-        title: `hk-linear-fallback-idea-${suffix}`,
-        description: "Fallback material unrelated to Linear.",
-        csid: `hk-item-linear-fail-${suffix}`,
-      });
+    it("no longer enriches from the item's own link", async () => {
       const [item] = await db
         .insert(items)
         .values({
           boardId,
-          name: `hk-item-linear-fail-${suffix}`,
+          name: `hk-item-link-only-${suffix}`,
           status: "todo",
-          description: "Track the payments migration",
-          link: "https://linear.app/meanwhile/issue/NAT-9999/gone",
+          description: "Framing.",
+          link: "https://linear.app/meanwhile/issue/NAT-300/gone",
         })
         .returning();
-      await db.insert(links).values({
-        fromType: "item",
-        fromId: item!.id,
-        toType: "idea",
-        toId: idea.id,
-        linkType: "connected",
-        createdByClientId: writer.id,
-      });
       await db.execute(sql`INSERT INTO jobs (kind, subject_id, payload) VALUES
-        ('item_context', ${item!.id}::uuid, ${JSON.stringify({ item_id: item!.id })}::jsonb)`);
+        ('item_context', ${item!.id}::uuid, ${JSON.stringify({ item_id: item!.id })}::jsonb)
+        ON CONFLICT DO NOTHING`);
 
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async () => {
-          throw new Error("network down");
-        }),
-      );
-
-      let sawLinearBlock = false;
-      const provider = fakeProvider((input) => {
-        if (input.user.includes("[linear issue]")) sawLinearBlock = true;
-        return "Synthesis from the fallback idea only.";
+      let called = false;
+      const provider = fakeProvider(() => {
+        called = true;
+        return "should not happen";
       });
-      const n = await housekeeperTick(db, provider, null, "test-linear-key");
-      expect(n).toBeGreaterThanOrEqual(1);
-      expect(sawLinearBlock).toBe(false); // fetch failed — no Linear block, no error
+      await housekeeperTick(db, provider, null, "test-linear-key");
 
+      // Nothing tracked and nothing else linked ⇒ no material, no model call.
+      expect(called).toBe(false);
       const fresh = await db.query.items.findFirst({ where: eq(items.id, item!.id) });
-      expect(fresh!.context).toContain("fallback idea"); // compile still succeeded
+      expect(fresh!.context).toBeNull();
     });
   });
 });

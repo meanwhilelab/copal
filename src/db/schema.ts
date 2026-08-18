@@ -147,7 +147,14 @@ export const contents = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("contents_created_at_idx").on(t.createdAt.desc())], // capture-stream ordering
+  (t) => [
+    index("contents_created_at_idx").on(t.createdAt.desc()), // capture-stream ordering
+    // One row per tracked Linear issue per workspace. The canonical, slug-free
+    // source_url is the issue's identity — see core/linear.ts canonicalLinearUrl.
+    uniqueIndex("contents_linear_ref_uq")
+      .on(t.workspaceId, t.sourceUrl)
+      .where(sql`source_type = 'linear'`),
+  ],
 );
 
 // File attachments. Per DESIGN, an attachment is a `content` (corpus entity)
@@ -220,8 +227,8 @@ export const idempotencyKeys = pgTable(
 
 // Semantic embeddings (phase 2). One current vector per corpus entity, upserted
 // on re-embed. `vector` is NOT a trusted extension — CREATE EXTENSION vector runs
-// out-of-band as the postgres superuser (ops/amber-pgvector-setup.sh), never in a
-// drizzle migration (which runs as the amber role).
+// out-of-band as the postgres superuser (ops/copal-pgvector-setup.sh), never in a
+// drizzle migration (which runs as the copal role).
 export const embeddings = pgTable(
   "embeddings",
   {

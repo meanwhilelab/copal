@@ -37,6 +37,7 @@ import {
   VersionConflictError,
   type ItemPatch,
 } from "../core/items.js";
+import { attachLinearIssue, NotALinearUrlError } from "../core/linear-issues.js";
 import { linkItems, removeLink, sinkEntity, unsinkEntity, type EntityType } from "../core/links.js";
 import { getObject, type ObjectType } from "../core/objects.js";
 import { acceptProposal, dismissProposal, listProposals } from "../core/proposals.js";
@@ -213,6 +214,7 @@ export async function buildApp(db: Db) {
     if (err instanceof VersionConflictError) return reply.code(409).send({ error: err.message });
     if (err instanceof BoardSetValidationError) return reply.code(422).send({ error: err.message });
     if (err instanceof BoardSetGuardError) return reply.code(400).send({ error: err.message });
+    if (err instanceof NotALinearUrlError) return reply.code(400).send({ error: err.message });
     if ((err as { statusCode?: number }).statusCode === 429) {
       return reply.code(429).send({ error: "rate limit exceeded" });
     }
@@ -535,6 +537,17 @@ export async function buildApp(db: Db) {
     return requestContextRebuild(db, id);
   });
 
+  // Track a Linear issue from this item. Any number per item; the issue becomes
+  // a content object whose snapshot is refreshed on every context compile.
+  // Detach with POST /api/v1/unlink (item ↔ content).
+  app.post("/api/v1/items/:id/linear", async (req, reply) => {
+    if (!requireWrite(req, reply)) return;
+    const { id } = req.params as { id: string };
+    const b = req.body as { url?: string };
+    if (!b?.url) return reply.code(400).send({ error: "url is required" });
+    return attachLinearIssue(db, req.apiClient!, { itemId: id, url: b.url }, config.capture.linear.apiKey ?? null);
+  });
+
   app.post("/api/v1/sink", async (req, reply) => {
     if (!requireWrite(req, reply)) return;
     const b = req.body as { type: string; id: string };
@@ -704,6 +717,7 @@ export async function buildApp(db: Db) {
       return { board: await updateBoard(db, (req.params as { id: string }).id, b ?? {}, req.apiClient) };
     } catch (err) {
       if (err instanceof BoardSetGuardError) return reply.code(400).send({ error: err.message });
+    if (err instanceof NotALinearUrlError) return reply.code(400).send({ error: err.message });
       throw err;
     }
   });

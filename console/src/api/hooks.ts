@@ -132,6 +132,16 @@ export const useLink = () => {
     onSettled: () => void qc.invalidateQueries({ queryKey: ["object"] }),
   });
 };
+/** Track a Linear issue from an item — the issue becomes a linked object whose
+ *  snapshot the Librarian refreshes on every context compile. */
+export const useTrackLinearIssue = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: { itemId: string; url: string }) =>
+      api(`/items/${b.itemId}/linear`, { method: "POST", body: { url: b.url } }),
+    onSettled: () => void qc.invalidateQueries({ queryKey: ["object"] }),
+  });
+};
 export const useUnlink = () => {
   const qc = useQueryClient();
   return useMutation({

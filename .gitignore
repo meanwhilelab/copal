@@ -5,6 +5,6 @@ dist/
 !.env.example
 *.log
 .DS_Store
-ops/hermes-plugin/amber-capture/token
+ops/hermes-plugin/copal-capture/token
 # Local deployment overrides — keep production/infra specifics out of the repo.
 docker-compose.override.yml

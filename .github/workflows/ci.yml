@@ -27,7 +27,7 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: amber
+          POSTGRES_DB: copal
         ports:
           - 5432:5432
         options: >-
@@ -38,7 +38,7 @@ jobs:
     env:
       # CI connects as the postgres superuser so CREATE EXTENSION works and the
       # migrations apply cleanly from an empty database (prod uses a scoped role).
-      DATABASE_URL: postgres://postgres:postgres@localhost:5432/amber
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/copal
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

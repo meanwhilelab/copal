@@ -5,6 +5,6 @@ export default defineConfig({
   schema: "./src/db/schema.ts",
   out: "./drizzle",
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? "postgres://amber:amber@localhost:5433/amber",
+    url: process.env.DATABASE_URL ?? "postgres://copal:copal@localhost:5433/copal",
   },
 });

@@ -7,7 +7,7 @@ import { recordEvent } from "./audit.js";
 import { sessionTitleSql } from "./display.js";
 import type { EmbeddingProvider } from "./embeddings.js";
 import { enqueueEmbed, type EntityType } from "./jobs.js";
-import { fetchLinearIssue, parseLinearIssueUrl } from "./linear.js";
+import { refreshLinearIssues } from "./linear-issues.js";
 import { costMicros, type LlmProvider } from "./llm.js";
 import { createProposal } from "./proposals.js";
 
@@ -343,6 +343,11 @@ async function handleItemContext(db: Db, provider: LlmProvider, itemId: string, 
   const item = await db.query.items.findFirst({ where: eq(items.id, itemId) });
   if (!item) return; // gone — no-op
 
+  // Tracked Linear issues are ordinary content connections; all this does is
+  // make sure their cached snapshots are current before we read them. Silent on
+  // failure: a stale snapshot still beats no material.
+  await refreshLinearIssues(db, itemId, linearApiKey);
+
   const connections = await loadItemConnectionsChronological(db, itemId);
   const material = (
     await Promise.all(
@@ -350,41 +355,9 @@ async function handleItemContext(db: Db, provider: LlmProvider, itemId: string, 
     )
   ).filter((c) => c.text);
 
-  // Linear enrichment (optional): if the item's own link points at a Linear
-  // issue and a key is configured, fetch the live issue and fold it into the
-  // material — same idiom as a declared connection. Any failure (unset key,
-  // non-Linear link, network error, deleted issue, ...) silently degrades to
-  // today's behavior: no block, no error.
-  let linearBlock: string | null = null;
-  if (linearApiKey && item.link) {
-    const identifier = parseLinearIssueUrl(item.link);
-    if (identifier) {
-      const issue = await fetchLinearIssue(identifier, linearApiKey);
-      if (issue) {
-        const description = issue.description?.trim() ? issue.description.slice(0, 2000) : "(no description)";
-        // Sub-issues ride along (chronological like everything else the prompt
-        // sees), each capped shorter than the parent so a large epic can't
-        // crowd out the item's own declared material.
-        const children = [...issue.children]
-          .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
-          .map(
-            (c) =>
-              `[linear sub-issue] "${c.identifier} — ${c.title}" — state ${c.state}, ` +
-              `updated ${fmtDate(c.updatedAt)}\n${c.description?.trim() ? c.description.slice(0, 800) : "(no description)"}`,
-          );
-        linearBlock = [
-          `[linear issue] "${issue.identifier} — ${issue.title}" — state ${issue.state}, ` +
-            `updated ${fmtDate(issue.updatedAt)}\n${description}`,
-          ...children,
-        ].join("\n\n---\n\n");
-      }
-    }
-  }
-
-  // Nothing declared-linked and no Linear enrichment (or nothing with usable
-  // text) — clear any stale context rather than spend a model call
-  // synthesizing from nothing.
-  if (material.length === 0 && !linearBlock) {
+  // Nothing declared-linked (or nothing with usable text) — clear any stale
+  // context rather than spend a model call synthesizing from nothing.
+  if (material.length === 0) {
     if (item.context !== null) {
       await db.transaction(async (tx) => {
         await tx.update(items).set({ context: null, contextCompiledAt: new Date() }).where(eq(items.id, itemId));
@@ -399,14 +372,13 @@ async function handleItemContext(db: Db, provider: LlmProvider, itemId: string, 
     return;
   }
 
-  const linked = [
-    ...material.map(
+  const linked = material
+    .map(
       (c) =>
         `[${c.type}${c.sunk ? ", sunk" : ""}] "${c.title}" — created ${fmtDate(c.created_at)}, ` +
         `linked (${c.link_type}) ${fmtDate(c.link_created_at)}\n${c.text}`,
-    ),
-    ...(linearBlock ? [linearBlock] : []),
-  ].join("\n\n---\n\n");
+    )
+    .join("\n\n---\n\n");
 
   const { text, inputTokens, outputTokens, model } = await provider.complete({
     system:
